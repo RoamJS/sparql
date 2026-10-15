@@ -1,0 +1,31 @@
+{
+  "name": "sparql",
+  "version": "0.1.0",
+  "description": "Import Wikidata and SPARQL SELECT results into Roam Research.",
+  "main": "index.js",
+  "scripts": {
+    "start": "samepage dev",
+    "build:roam": "samepage build --dry",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts",
+    "format:check": "prettier --check src tests README.md CHANGELOG.md"
+  },
+  "keywords": [
+    "roam",
+    "roam-research",
+    "roamjs"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "roamjs-components": "^0.86.4"
+  },
+  "devDependencies": {
+    "prettier": "^3.2.5",
+    "prettier-plugin-tailwindcss": "^0.6.11",
+    "typescript": "^5.6.3",
+    "tsx": "^4.19.2"
+  },
+  "samepage": {
+    "extends": "node_modules/roamjs-components/package.json"
+  }
+}

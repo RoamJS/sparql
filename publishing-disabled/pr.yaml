@@ -1,0 +1,35 @@
+name: Build Extension Preview
+
+on:
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "src/**"
+      - "README.md"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/pr.yaml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-extension-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: install
+        run: npm ci
+      - name: build
+        run: npx samepage build --dry
+      - name: upload preview artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: extension-preview
+          path: dist/*
+          if-no-files-found: error

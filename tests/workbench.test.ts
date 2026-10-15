@@ -324,3 +324,63 @@ test("switching native source unmounts the captured old host root and mounts a f
     localStorage.clear();
   }
 });
+
+test("own refresh timestamps do not look like an external saved-definition edit", async () => {
+  const graph = new MemoryGraph();
+  graph.put("page", "Destination");
+  const update = graph.update;
+  graph.update = async (args): Promise<void> => {
+    await update(args);
+    graph.nodes.get(args.uid)!.edited = graph.writes;
+  };
+  const service = new QueryService(graph, () => "Date");
+  const first = await service.import({
+    preview: await service.preview({
+      query,
+      destination: "page",
+      signature: "timestamp",
+      label: "Saved",
+      name: "Saved",
+      save: true,
+    }),
+    currentSignature: "timestamp",
+  });
+  const saved = readSaved(graph)[0];
+  const before = JSON.stringify(graph.read(saved.recordUid));
+  const ui = mount(
+    graph,
+    {
+      destination: first.rootUid,
+      blockUid: first.rootUid,
+      savedRoot: first.rootUid,
+    },
+    service,
+  );
+  try {
+    await act(
+      async (): Promise<void> =>
+        fireEvent.click(
+          ui.getByRole("button", { name: "Refresh saved import", exact: true }),
+        ),
+    );
+    assert.match(ui.getByRole("status").textContent || "", /Import complete/);
+    assert.notEqual(JSON.stringify(graph.read(saved.recordUid)), before);
+    fireEvent.click(
+      ui.getByRole("button", { name: "Query settings", exact: true }),
+    );
+    fireEvent.change(ui.getByLabelText("Output format", { exact: true }), {
+      target: { value: "Table" },
+    });
+    await act(
+      async (): Promise<void> =>
+        fireEvent.click(
+          ui.getByRole("button", { name: "Save definition", exact: true }),
+        ),
+    );
+    assert.match(ui.getByRole("status").textContent || "", /Definition saved/);
+    assert.equal(readSaved(graph)[0].outputFormat, "Table");
+  } finally {
+    cleanup();
+    localStorage.clear();
+  }
+});

@@ -475,6 +475,16 @@ export const Workbench = ({
         throw new Error(
           `${outcome.journal.status === "partial" ? "Partial import" : "Import failed"}: ${outcome.journal.error}. ${outcome.journal.changes.length} recorded output changes. Identity or metadata writes may also have completed; inspect the graph.`,
         );
+      if (saved) {
+        const updated = readSaved(graph).find(
+          (record) => record.rootUid === outcome.rootUid,
+        );
+        if (updated) {
+          savedRevision.current = JSON.stringify(graph.read(updated.recordUid));
+          setSaved(updated);
+          setDestination(updated.rootUid);
+        }
+      }
       setStatus(
         `Import complete. ${outcome.journal.changes.length} output writes. ${outcome.journal.retained.length ? `${outcome.journal.retained.length} edited, missing or obsolete output blocks retained; review manually.` : ""}`,
       );

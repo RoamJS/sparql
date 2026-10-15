@@ -109,6 +109,37 @@ export const ensureCustom = async (graph: Graph): Promise<string> => {
   });
   return uid;
 };
+export const copyQuerySource = async ({
+  graph,
+  query,
+  name,
+}: {
+  graph: Graph;
+  query: Query;
+  name: string;
+}): Promise<string> => {
+  const configUid = await graph.ensurePage(CONFIG);
+  const sourcesUid = await ensureChild({
+    graph,
+    parentUid: configUid,
+    text: "standalone/sources",
+  });
+  const parentUid = graph.uid();
+  await graph.create({ uid: parentUid, parentUid: sourcesUid, text: name });
+  const uid = graph.uid();
+  await graph.create({
+    uid,
+    parentUid,
+    text: `\`\`\`sparql\n${query.query}\n\`\`\``,
+  });
+  for (const text of [
+    `sparql endpoint:: ${query.source}`,
+    `sparql endpoint mode:: ${query.endpointMode}`,
+    `sparql format:: ${query.outputFormat}`,
+  ])
+    await graph.create({ uid: graph.uid(), parentUid: uid, text });
+  return uid;
+};
 export const saveMeta = async ({
   graph,
   meta,

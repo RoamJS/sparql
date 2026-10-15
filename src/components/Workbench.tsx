@@ -24,6 +24,7 @@ import { host } from "~/roam";
 import { Preview, QueryService } from "~/service";
 import {
   ensureCustom,
+  copyQuerySource,
   readDefaults,
   readMeta,
   readSaved,
@@ -455,6 +456,8 @@ export const Workbench = ({
             setStatus(`Importing… ${count} output writes completed.`);
         },
       });
+      if (outcome.journal.status === "partial")
+        localStorage.setItem(journalKey, JSON.stringify(outcome.journal));
       if (!mounted.current) return;
       setJournal(outcome.journal);
       setPreview(undefined);
@@ -490,11 +493,18 @@ export const Workbench = ({
     try {
       const query = querySpec();
       if (copy) {
+        const copyName = `${name || saved.name} (copy)`;
+        const copiedSourceUid = await copyQuerySource({
+          graph,
+          query,
+          name: copyName,
+        });
+        setSourceUid(copiedSourceUid);
         setSaved(undefined);
         setDestination(launch.destination);
         setSave(true);
         setPreview(undefined);
-        setName(`${name || saved.name} (copy)`);
+        setName(copyName);
         setStatus(
           "Copy draft ready. Import to create a separate saved output and definition.",
         );
@@ -518,6 +528,10 @@ export const Workbench = ({
         },
       });
       savedRevision.current = JSON.stringify(graph.read(saved.recordUid));
+      const updated = readSaved(graph).find(
+        (record) => record.recordUid === saved.recordUid,
+      );
+      if (updated) setSaved(updated);
       refreshLibrary();
       setPreview(undefined);
       setStatus(

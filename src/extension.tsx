@@ -72,8 +72,10 @@ export default runExtension(async ({ extensionAPI }) => {
   };
   const openWorkspace = async (): Promise<void> => {
     const original = await context();
+    if (disposed) return;
     close();
     const uid = await graph.ensurePage(WORKSPACE);
+    if (disposed) return;
     if (!graph.read(uid)?.children.length)
       await graph.create({
         uid: graph.uid(),
@@ -119,6 +121,7 @@ export default runExtension(async ({ extensionAPI }) => {
     unmount(workspaceMount);
     workspaceMount = undefined;
     dialogLaunch = await context(overrides);
+    if (disposed) return;
     dialogMount = document.createElement("div");
     mounts.add(dialogMount);
     document.body.appendChild(dialogMount);
@@ -245,6 +248,7 @@ export default runExtension(async ({ extensionAPI }) => {
     syncing = true;
     try {
       const uid = await api.ui.mainWindow.getOpenPageOrBlockUid();
+      if (disposed) return;
       if (graph.read(uid || "")?.title !== WORKSPACE) {
         unmount(workspaceMount);
         workspaceMount = undefined;
@@ -259,6 +263,7 @@ export default runExtension(async ({ extensionAPI }) => {
         document.querySelector(".roam-article");
       if (!anchor) return;
       workspaceLaunch ||= await context();
+      if (disposed) return;
       workspaceMount = document.createElement("div");
       workspaceMount.className = "sparql-workspace-mount";
       mounts.add(workspaceMount);

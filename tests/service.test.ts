@@ -189,3 +189,40 @@ test("one active request per controller and cancellation leave graph unchanged",
     globalThis.fetch = original;
   }
 });
+test("a user-renamed output root remains protected across repeated refreshes", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => Response.json(result);
+  try {
+    const { graph, service } = setup();
+    const args = {
+      query,
+      destination: "page",
+      signature: "label",
+      label: "Generated",
+      name: "",
+      save: true,
+    };
+    const first = await service.import({
+      preview: await service.preview(args),
+      currentSignature: "label",
+    });
+    await graph.update({ uid: first.rootUid, text: "My custom label" });
+    for (let run = 0; run < 3; run++) {
+      const saved = readSaved(graph)[0];
+      const refreshed = await service.import({
+        preview: await service.preview({
+          ...args,
+          query: saved,
+          saved,
+          destination: first.rootUid,
+        }),
+        currentSignature: "label",
+      });
+      assert.equal(refreshed.journal.status, "complete");
+      assert.equal(graph.read(first.rootUid)?.text, "My custom label");
+      assert.ok(refreshed.journal.retained.includes(first.rootUid));
+    }
+  } finally {
+    globalThis.fetch = original;
+  }
+});

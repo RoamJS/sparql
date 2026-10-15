@@ -258,6 +258,7 @@ export class QueryService {
       journal.retained = written.retained;
       if (written.status !== "complete") throw new Error(written.error);
       const root = this.graph.read(rootUid);
+      let renderedLabel = meta?.renderedLabel || root?.text;
       const nextLabel = labelText({
         label: preview.label,
         format: preview.query.outputFormat,
@@ -277,6 +278,7 @@ export class QueryService {
           before: root.text,
           after: nextLabel,
         });
+        renderedLabel = nextLabel;
       } else if (meta?.renderedLabel && root?.text !== meta.renderedLabel)
         journal.retained.push(rootUid);
       if (controller.signal.aborted)
@@ -327,7 +329,7 @@ export class QueryService {
           ownershipVerified: true,
           owned: journal.owned,
           label: preview.label,
-          renderedLabel: this.graph.read(rootUid)?.text,
+          renderedLabel,
           lastRun: new Date().toISOString(),
         },
       });

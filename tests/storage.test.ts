@@ -104,3 +104,29 @@ test("per-query endpoint metadata is independent of legacy positions", () => {
   assert.equal(query.sourceUid, "code");
   assert.equal(query.query, "SELECT ?x {}");
 });
+
+test("saved record persistence honors cancellation between every awaited write", async () => {
+  for (const stopAt of [1, 2, 3, 4, 5, 6]) {
+    const graph = new MemoryGraph();
+    graph.put("root", "Output");
+    const controller = new AbortController();
+    graph.beforeWrite = (): void => {
+      if (graph.writes + 1 === stopAt) controller.abort();
+    };
+    await assert.rejects(
+      saveRecord({
+        graph,
+        rootUid: "root",
+        query: {
+          query: "SELECT ?x {}",
+          source: "https://example.test/?q=",
+          endpointMode: "prefix",
+          outputFormat: "Parent",
+        },
+        signal: controller.signal,
+      }),
+      /Stopped/,
+    );
+    assert.equal(graph.writes, stopAt);
+  }
+});

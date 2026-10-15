@@ -154,3 +154,64 @@ test("bounded recovery retains edited and referenced created blocks", async () =
   assert.equal(recovered.retained.length, 3);
   assert.equal(graph.read(outcome.changes[1].uid)?.text, "User changed");
 });
+
+test("refresh inserts new sorted siblings and Table header without moving existing nodes", async () => {
+  const graph = setup();
+  const initial: Plan = {
+    nodes: [
+      { key: "b", text: "Beta", children: [] },
+      { key: "g", text: "Gamma", children: [] },
+    ],
+    rows: 2,
+    identities: [],
+    warnings: [],
+  };
+  const first = await applyPlan({
+    graph,
+    rootUid: "root",
+    plan: initial,
+    signal: new AbortController().signal,
+    expectedRevision: revision(graph, "root"),
+  });
+  graph.put("note", "User note", "root");
+  const meta: ImportMeta = {
+    version: 1,
+    rootUid: "root",
+    name: "Test",
+    endpointMode: "prefix",
+    compatibility: false,
+    owned: first.owned,
+    label: "Import",
+  };
+  const updated: Plan = {
+    ...initial,
+    nodes: [
+      { key: "header:x", text: "x", children: [] },
+      { key: "a", text: "Alpha", children: [] },
+      initial.nodes[0],
+      { key: "d", text: "Delta", children: [] },
+      initial.nodes[1],
+    ],
+  };
+  const outcome = await applyPlan({
+    graph,
+    rootUid: "root",
+    plan: updated,
+    meta,
+    signal: new AbortController().signal,
+    expectedRevision: revision(graph, "root"),
+  });
+  assert.equal(outcome.status, "complete");
+  assert.deepEqual(
+    graph.read("root")!.children.map((n) => n.text),
+    ["x", "Alpha", "Beta", "Delta", "Gamma", "User note"],
+  );
+  assert.deepEqual(
+    graph
+      .read("root")!
+      .children.filter((n) => ["Beta", "Gamma", "User note"].includes(n.text))
+      .map((n) => n.uid),
+    [first.owned[0].uid, first.owned[1].uid, "note"],
+  );
+  assert.ok(outcome.changes.every((c) => c.kind === "create"));
+});

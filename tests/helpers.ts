@@ -32,14 +32,24 @@ export class MemoryGraph implements Graph {
     uid,
     parentUid,
     text,
+    order,
   }: {
     uid: string;
     parentUid: string;
     text: string;
+    order?: number;
   }): Promise<void> => {
     this.check();
     if (!this.nodes.has(parentUid)) throw new Error("Missing parent");
     this.put(uid, text, parentUid);
+    if (order !== undefined) {
+      const siblings = this.nodes.get(parentUid)!.children;
+      const [created] = siblings.splice(
+        siblings.findIndex((node) => node.uid === uid),
+        1,
+      );
+      siblings.splice(order, 0, created);
+    }
   };
   update = async ({
     uid,

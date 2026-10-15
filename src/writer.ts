@@ -45,7 +45,8 @@ export const applyPlan = async ({
         "Destination changed since preview. Preview again before importing.",
       );
     const write = async (nodes: Node[], parentUid: string): Promise<void> => {
-      for (const node of nodes) {
+      let precedingUid: string | undefined;
+      for (const [index, node] of nodes.entries()) {
         check();
         const old = previous.get(node.key);
         const current = old && graph.read(old.uid);
@@ -71,7 +72,32 @@ export const applyPlan = async ({
             after: node.text,
           });
         } else if (!current) {
-          await graph.create({ uid, parentUid, text: node.text });
+          const siblings = graph.read(parentUid)?.children || [];
+          const following = nodes
+            .slice(index + 1)
+            .map((next) => previous.get(next.key))
+            .find((next) => {
+              const candidate = next && graph.read(next.uid);
+              return (
+                next &&
+                candidate?.text === next.text &&
+                graph.parent(next.uid) === parentUid
+              );
+            });
+          const followingIndex = following
+            ? siblings.findIndex((sibling) => sibling.uid === following.uid)
+            : -1;
+          const precedingIndex = siblings.findIndex(
+            (sibling) => sibling.uid === precedingUid,
+          );
+          const order = node.key.startsWith("header:")
+            ? 0
+            : followingIndex >= 0
+              ? followingIndex
+              : precedingIndex >= 0
+                ? precedingIndex + 1
+                : siblings.length;
+          await graph.create({ uid, parentUid, text: node.text, order });
           journal.changes.push({
             kind: "create",
             uid,
@@ -79,6 +105,7 @@ export const applyPlan = async ({
             after: node.text,
           });
         }
+        precedingUid = uid;
         journal.owned.push({ uid, parentUid, key: node.key, text: node.text });
         onProgress?.(journal.changes.length);
         await write(node.children, uid);
@@ -143,6 +170,8 @@ export const writeIdentities = async ({
     if (signal.aborted)
       throw new Error("Stopped before identity links finished.");
     const pageUid = await graph.ensurePage(identity.title);
+    if (signal.aborted)
+      throw new Error("Stopped before identity links finished.");
     if (
       !graph
         .read(pageUid)

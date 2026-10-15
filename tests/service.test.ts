@@ -226,3 +226,33 @@ test("a user-renamed output root remains protected across repeated refreshes", a
     globalThis.fetch = original;
   }
 });
+
+test("cancellation during metadata write prevents subsequent saved-definition writes", async () => {
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => Response.json(result);
+  try {
+    const { graph, service } = setup();
+    const create = graph.create;
+    graph.create = async (args): Promise<void> => {
+      await create(args);
+      if (args.text.includes('"ownershipVerified":true')) service.cancel();
+    };
+    const preview = await service.preview({
+      query,
+      destination: "page",
+      signature: "meta-stop",
+      label: "Import",
+      name: "",
+      save: true,
+    });
+    const applied = await service.import({
+      preview,
+      currentSignature: "meta-stop",
+    });
+    assert.equal(applied.journal.status, "partial");
+    assert.match(applied.journal.error || "", /Stopped/);
+    assert.equal(readSaved(graph).length, 0);
+  } finally {
+    globalThis.fetch = original;
+  }
+});

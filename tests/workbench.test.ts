@@ -48,7 +48,10 @@ const { Workbench } = require("./src/components/Workbench.tsx");
 dom.window.roamAlphaAPI = {
   graph: { name: "workbench-regression" },
   ui: {
-    components: { renderBlock: async (): Promise<void> => {} },
+    components: {
+      renderBlock: async (): Promise<void> => {},
+      unmountNode: async (): Promise<void> => {},
+    },
     mainWindow: { openBlock: async (): Promise<void> => {} },
   },
 };
@@ -228,6 +231,96 @@ test("closing during an awaited write persists its partial recovery journal", as
     );
   } finally {
     cleanup();
+    localStorage.clear();
+  }
+});
+
+test("successful import clears an obsolete persisted partial recovery journal", async () => {
+  const graph = new MemoryGraph();
+  graph.put("page", "Destination");
+  graph.put("source", "```sparql\nSELECT ?x {}\n```", "page");
+  const key = "roamjs:sparql:v1:workbench-regression:journal";
+  localStorage.setItem(
+    key,
+    JSON.stringify({ status: "partial", changes: [], owned: [], retained: [] }),
+  );
+  const currentLaunch = {
+    destination: "page",
+    blockUid: "source",
+    sourceUid: "source",
+    mode: "Custom Query",
+  };
+  const ui = mount(graph, currentLaunch);
+  try {
+    await act(
+      async (): Promise<void> =>
+        fireEvent.click(
+          ui.getByRole("button", { name: "Import", exact: true }),
+        ),
+    );
+    await waitFor((): void =>
+      assert.match(ui.getByRole("status").textContent || "", /Import complete/),
+    );
+    assert.equal(localStorage.getItem(key), null);
+    ui.unmount();
+    const reopened = mount(graph, currentLaunch);
+    assert.equal(reopened.queryByText(/Operation journal · partial/), null);
+  } finally {
+    cleanup();
+    localStorage.clear();
+  }
+});
+
+test("switching native source unmounts the captured old host root and mounts a fresh anchor", async () => {
+  const graph = new MemoryGraph();
+  graph.put("page", "Destination");
+  graph.put("one", "```sparql\nSELECT ?one {}\n```", "page");
+  graph.put("two", "```sparql\nSELECT ?two {}\n```", "page");
+  const components = dom.window.roamAlphaAPI.ui.components;
+  const previous = { ...components };
+  const ReactDOM = require("react-dom");
+  const unmounted: HTMLElement[] = [];
+  components.renderBlock = async ({
+    uid,
+    el,
+  }: {
+    uid: string;
+    el: HTMLElement;
+  }): Promise<void> => {
+    ReactDOM.render(React.createElement("span", null, uid), el);
+  };
+  components.unmountNode = async ({
+    el,
+  }: {
+    el: HTMLElement;
+  }): Promise<void> => {
+    unmounted.push(el);
+    ReactDOM.unmountComponentAtNode(el);
+  };
+  const ui = mount(graph, {
+    destination: "page",
+    blockUid: "one",
+    sourceUid: "one",
+    mode: "Custom Query",
+  });
+  try {
+    const first = ui.getByLabelText("Native SPARQL source editor");
+    assert.equal(first.textContent, "one");
+    fireEvent.change(ui.getByLabelText("Source block UID", { exact: true }), {
+      target: { value: "two" },
+    });
+    await waitFor((): void =>
+      assert.equal(
+        ui.getByLabelText("Native SPARQL source editor").textContent,
+        "two",
+      ),
+    );
+    assert.notEqual(ui.getByLabelText("Native SPARQL source editor"), first);
+    assert.ok(unmounted.includes(first));
+    assert.equal(first.textContent, "");
+  } finally {
+    cleanup();
+    Object.assign(components, previous);
     localStorage.clear();
   }
 });

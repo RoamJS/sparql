@@ -319,6 +319,7 @@ export class QueryService {
         throw new Error("Stopped before saved records finished.");
       await saveMeta({
         graph: this.graph,
+        signal: controller.signal,
         meta: {
           version: 1,
           rootUid,
@@ -333,8 +334,15 @@ export class QueryService {
           lastRun: new Date().toISOString(),
         },
       });
+      if (controller.signal.aborted)
+        throw new Error("Stopped before saved records finished.");
       if (preview.save || preview.rootUid)
-        await saveRecord({ graph: this.graph, rootUid, query: preview.query });
+        await saveRecord({
+          graph: this.graph,
+          rootUid,
+          query: preview.query,
+          signal: controller.signal,
+        });
     } catch (error) {
       journal.status = journal.changes.length ? "partial" : "failed";
       journal.error = error instanceof Error ? error.message : String(error);

@@ -12,7 +12,7 @@ export type Host = {
   pull: (pattern: string, entity: [string, string]) => Pull | null;
   q: (query: string, ...args: unknown[]) => unknown;
   createBlock: (args: {
-    location: { "parent-uid": string; order: "last" };
+    location: { "parent-uid": string; order: "last" | number };
     block: { uid: string; string: string };
   }) => Promise<void>;
   updateBlock: (args: {
@@ -37,6 +37,7 @@ export type Host = {
       openBlock: (args: { block: { uid: string } }) => Promise<void>;
     };
     components: {
+      unmountNode: (args: { el: HTMLElement }) => Promise<void>;
       renderBlock: (args: {
         uid: string;
         el: HTMLElement;
@@ -95,9 +96,9 @@ export const roamGraph = (): Graph => {
         "[:find ?u . :in $ ?uid :where [?b :block/uid ?uid] [?p :block/children ?b] [?p :block/uid ?u]]",
         uid,
       ) as string | undefined,
-    create: async ({ uid, parentUid, text }): Promise<void> => {
+    create: async ({ uid, parentUid, text, order }): Promise<void> => {
       await api.createBlock({
-        location: { "parent-uid": parentUid, order: "last" },
+        location: { "parent-uid": parentUid, order: order ?? "last" },
         block: { uid, string: text },
       });
     },

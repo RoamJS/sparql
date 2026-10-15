@@ -77,15 +77,22 @@ export const readSaved = (graph: Graph): Saved[] =>
     };
   });
 
+const checkCancelled = (signal?: AbortSignal): void => {
+  if (signal?.aborted)
+    throw new Error("Stopped before saved records finished.");
+};
 export const ensureChild = async ({
   graph,
   parentUid,
   text,
+  signal,
 }: {
   graph: Graph;
   parentUid: string;
   text: string;
+  signal?: AbortSignal;
 }): Promise<string> => {
+  checkCancelled(signal);
   const existing = child(graph.read(parentUid), text);
   if (existing) return existing.uid;
   const uid = graph.uid();
@@ -143,46 +150,61 @@ export const copyQuerySource = async ({
 export const saveMeta = async ({
   graph,
   meta,
+  signal,
 }: {
   graph: Graph;
   meta: ImportMeta;
+  signal?: AbortSignal;
 }): Promise<void> => {
+  checkCancelled(signal);
   const configUid = await graph.ensurePage(CONFIG);
+  checkCancelled(signal);
   const parentUid = await ensureChild({
     graph,
     parentUid: configUid,
     text: "standalone/v1",
+    signal,
   });
+  checkCancelled(signal);
   const existing = graph
     .read(parentUid)
     ?.children.find((node) => node.text.startsWith(`${meta.rootUid} `));
   const text = `${meta.rootUid} ${JSON.stringify(meta)}`;
   if (existing) await graph.update({ uid: existing.uid, text });
   else await graph.create({ uid: graph.uid(), parentUid, text });
+  checkCancelled(signal);
 };
 export const saveRecord = async ({
   graph,
   rootUid,
   query,
+  signal,
 }: {
   graph: Graph;
   rootUid: string;
   query: Query;
+  signal?: AbortSignal;
 }): Promise<void> => {
+  checkCancelled(signal);
   const configUid = await graph.ensurePage(CONFIG);
+  checkCancelled(signal);
   const parentUid = await ensureChild({
     graph,
     parentUid: configUid,
     text: "queries",
+    signal,
   });
+  checkCancelled(signal);
   const existing = graph
     .read(parentUid)
     ?.children.find((record) => record.text === rootUid);
   const recordUid = existing?.uid || graph.uid();
   if (!existing)
     await graph.create({ uid: recordUid, parentUid, text: rootUid });
+  checkCancelled(signal);
   const values = [query.query, query.source, query.outputFormat];
   for (let index = 0; index < values.length; index++) {
+    checkCancelled(signal);
     const field = existing?.children[index];
     if (field) await graph.update({ uid: field.uid, text: values[index] });
     else
@@ -191,6 +213,7 @@ export const saveRecord = async ({
         parentUid: recordUid,
         text: values[index],
       });
+    checkCancelled(signal);
   }
 };
 

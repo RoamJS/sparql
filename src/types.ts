@@ -83,6 +83,7 @@ export type Graph = {
     uid: string;
     parentUid: string;
     text: string;
+    order?: number;
   }) => Promise<void>;
   update: (args: { uid: string; text: string }) => Promise<void>;
   remove: (uid: string) => Promise<void>;

@@ -76,14 +76,21 @@ const NativeSource = ({
     anchor.current?.toggleAttribute("inert", disabled);
   }, [disabled]);
   useEffect(() => {
-    if (anchor.current && uid)
-      void host().ui.components.renderBlock({
+    const el = anchor.current;
+    if (!el || !uid) return;
+    let disposed = false;
+    void host()
+      .ui.components.renderBlock({
         uid,
-        el: anchor.current,
+        el,
         "zoom-path?": false,
+      })
+      .then(() => {
+        if (disposed) void host().ui.components.unmountNode({ el });
       });
     return (): void => {
-      anchor.current?.replaceChildren();
+      disposed = true;
+      void host().ui.components.unmountNode({ el });
     };
   }, [uid]);
   return (
@@ -458,6 +465,8 @@ export const Workbench = ({
       });
       if (outcome.journal.status === "partial")
         localStorage.setItem(journalKey, JSON.stringify(outcome.journal));
+      else if (outcome.journal.status === "complete")
+        localStorage.removeItem(journalKey);
       if (!mounted.current) return;
       setJournal(outcome.journal);
       setPreview(undefined);
@@ -854,6 +863,7 @@ export const Workbench = ({
                   </div>
                   {sourceUid && graph.read(sourceUid) ? (
                     <NativeSource
+                      key={sourceUid}
                       uid={sourceUid}
                       onEdit={() => setSourceRevision((v) => v + 1)}
                       disabled={busy || !!blocked}

@@ -2,12 +2,12 @@
   "name": "sparql",
   "version": "0.1.0",
   "description": "Import Wikidata and SPARQL SELECT results into Roam Research.",
-  "main": "index.js",
+  "main": "extension.js",
   "scripts": {
     "start": "samepage dev",
     "build:roam": "samepage build --dry",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test tests/*.test.ts",
+    "test": "node --import tsx --test tests/*.test.ts",
     "format:check": "prettier --check src tests README.md CHANGELOG.md"
   },
   "keywords": [
@@ -26,6 +26,9 @@
     "tsx": "^4.19.2"
   },
   "samepage": {
-    "extends": "node_modules/roamjs-components/package.json"
+    "extends": "node_modules/roamjs-components/package.json",
+    "include": [
+      "CHANGELOG.md"
+    ]
   }
 }

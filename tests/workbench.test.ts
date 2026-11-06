@@ -677,3 +677,67 @@ test("persisted native-source watch marks preview stale and removes only its own
     dom.window.roamAlphaAPI = previousHost;
   }
 });
+
+test("explicit Preview recaptures a changed destination revision and previewed import does not refetch", async () => {
+  const graph = new MemoryGraph();
+  graph.put("page", "Destination");
+  graph.put("source", "```sparql\nSELECT ?x {}\n```", "page");
+  const previousFetch = globalThis.fetch;
+  let requests = 0;
+  globalThis.fetch = async (): Promise<Response> => {
+    requests++;
+    return Response.json({
+      head: { vars: ["x"] },
+      results: { bindings: [{ x: { type: "literal", value: "Result" } }] },
+    });
+  };
+  const ui = mount(graph, {
+    destination: "page",
+    blockUid: "source",
+    sourceUid: "source",
+    mode: "Custom Query",
+  });
+  try {
+    await act(async () =>
+      fireEvent.click(ui.getByRole("button", { name: "Preview", exact: true })),
+    );
+    graph.put("user-note", "External note added after preview", "page");
+    await act(async () =>
+      fireEvent.click(
+        ui.getByRole("button", {
+          name: "Import previewed results",
+          exact: true,
+        }),
+      ),
+    );
+    assert.match(
+      ui.getByRole("status").textContent,
+      /Destination changed since preview/,
+    );
+    assert.equal(requests, 1);
+    assert.equal(graph.writes, 0);
+    await act(async () =>
+      fireEvent.click(ui.getByRole("button", { name: "Preview", exact: true })),
+    );
+    assert.equal(requests, 2);
+    assert.match(ui.getByRole("status").textContent, /Preview ready/);
+    await act(async () =>
+      fireEvent.click(
+        ui.getByRole("button", {
+          name: "Import previewed results",
+          exact: true,
+        }),
+      ),
+    );
+    assert.equal(requests, 2);
+    assert.match(ui.getByRole("status").textContent, /Import complete/);
+    assert.equal(
+      graph.read("user-note")!.text,
+      "External note added after preview",
+    );
+  } finally {
+    cleanup();
+    localStorage.clear();
+    globalThis.fetch = previousFetch;
+  }
+});

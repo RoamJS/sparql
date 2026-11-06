@@ -28,3 +28,5 @@ All notable changes are documented here, following [Keep a Changelog](https://ke
 - **Selected labels and dates** - Keep standalone `Label` columns and preserve the stated calendar day of date-only and midnight UTC values.
 
 - **Persisted source changes** - Mark previews stale after native Roam finishes saving an edit, including edits from another placement of the source.
+
+- **Preview refresh and empty table cells** - Rebuild explicit previews after destination edits and preserve empty or unbound columns in Table output.

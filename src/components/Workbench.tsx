@@ -450,7 +450,7 @@ export const Workbench = ({
     try {
       const currentSignature = signature();
       const built =
-        preview?.signature === currentSignature
+        importDirect && preview?.signature === currentSignature
           ? preview
           : await service.preview({
               query: querySpec(),

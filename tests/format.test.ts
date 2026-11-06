@@ -237,3 +237,67 @@ test("calendar dates and midnight UTC Wikidata dates retain their calendar day a
     else process.env.TZ = previous;
   }
 });
+
+test("Table preserves unbound and empty cell positions while Parent keeps filtering", () => {
+  for (const compatibility of [false, true]) {
+    const optional: Result = {
+      head: { vars: ["a", "b", "c"] },
+      results: { bindings: [{ b: { type: "literal", value: "42" } }] },
+    };
+    const table = planOutput({
+      result: optional,
+      format: "Table",
+      dateTitle,
+      compatibility,
+    });
+    assert.equal(table.nodes[0].text, "a");
+    assert.equal(table.nodes[0].children[0].text, "b");
+    assert.equal(table.nodes[0].children[0].children[0].text, "c");
+    assert.equal(table.nodes[1].text, "");
+    assert.equal(table.nodes[1].children[0].text, "42");
+    assert.equal(table.nodes[1].children[0].children[0].text, "");
+    optional.results.bindings = [
+      {
+        a: { type: "literal", value: "" },
+        b: { type: "literal", value: "Later column" },
+        c: { type: "literal", value: "" },
+      },
+    ];
+    const empty = planOutput({
+      result: optional,
+      format: "Table",
+      dateTitle,
+      compatibility,
+    });
+    assert.equal(empty.nodes[1].text, "");
+    assert.equal(empty.nodes[1].children[0].text, "Later column");
+    assert.equal(empty.nodes[1].children[0].children[0].text, "");
+    for (const middle of [undefined, { type: "literal" as const, value: "" }]) {
+      const row = {
+        a: { type: "literal" as const, value: "Leading" },
+        c: { type: "literal" as const, value: "Trailing" },
+        ...(middle ? { b: middle } : {}),
+      };
+      const middleTable = planOutput({
+        result: { ...optional, results: { bindings: [row] } },
+        format: "Table",
+        dateTitle,
+        compatibility,
+      });
+      assert.equal(middleTable.nodes[1].text, "Leading");
+      assert.equal(middleTable.nodes[1].children[0].text, "");
+      assert.equal(
+        middleTable.nodes[1].children[0].children[0].text,
+        "Trailing",
+      );
+    }
+    const parent = planOutput({
+      result: optional,
+      format: "Parent",
+      dateTitle,
+      compatibility,
+    });
+    assert.equal(parent.nodes[0].text, "Later column");
+    assert.deepEqual(parent.nodes[0].children, []);
+  }
+});

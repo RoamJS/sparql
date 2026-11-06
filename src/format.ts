@@ -87,7 +87,7 @@ export const planOutput = ({
     let level = roots;
     let prefix = "";
     cells
-      .filter((cell) => cell.text)
+      .filter((cell) => format === "Table" || cell.text)
       .forEach((cell) => {
         prefix += `/${cell.key}`;
         let group = grouped.get(level);

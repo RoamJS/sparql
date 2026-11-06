@@ -67,13 +67,41 @@ const TreePreview = ({ nodes }: { nodes: Node[] }): React.ReactElement => (
 const NativeSource = ({
   uid,
   onEdit,
+  onError,
   disabled,
 }: {
   uid: string;
   onEdit: () => void;
+  onError: (error: unknown) => void;
   disabled: boolean;
 }): React.ReactElement => {
   const anchor = useRef<HTMLDivElement>(null);
+  const latestEdit = useRef(onEdit);
+  const latestError = useRef(onError);
+  latestEdit.current = onEdit;
+  latestError.current = onError;
+  useEffect(() => {
+    const watches = host().data;
+    if (!watches) return;
+    const pattern = "[:block/string]";
+    const entity = `[:block/uid ${JSON.stringify(uid)}]`;
+    let disposed = false;
+    const changed = (): void => {
+      if (!disposed) latestEdit.current();
+    };
+    void watches
+      .addPullWatch(pattern, entity, changed)
+      .then(() => {
+        if (disposed) return watches.removePullWatch(pattern, entity, changed);
+      })
+      .catch((error: unknown) => {
+        if (!disposed) latestError.current(error);
+      });
+    return (): void => {
+      disposed = true;
+      void watches.removePullWatch(pattern, entity, changed);
+    };
+  }, [uid]);
   useEffect(() => {
     anchor.current?.toggleAttribute("inert", disabled);
   }, [disabled]);
@@ -911,6 +939,7 @@ export const Workbench = ({
                       uid={sourceUid}
                       onEdit={() => setSourceRevision((v) => v + 1)}
                       disabled={busy || !!blocked}
+                      onError={fail}
                     />
                   ) : (
                     saved && (

@@ -9,6 +9,18 @@ type Pull = {
   ":block/children"?: Pull[];
 };
 export type Host = {
+  data?: {
+    addPullWatch: (
+      pattern: string,
+      entity: string,
+      callback: () => void,
+    ) => Promise<unknown>;
+    removePullWatch: (
+      pattern: string,
+      entity: string,
+      callback: () => void,
+    ) => Promise<unknown>;
+  };
   pull: (pattern: string, entity: [string, string]) => Pull | null;
   q: (query: string, ...args: unknown[]) => unknown;
   createBlock: (args: {

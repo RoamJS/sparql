@@ -322,7 +322,7 @@ export default runExtension(async ({ extensionAPI }) => {
           `sidebar-window-${window["window-id"]}`,
         );
         const anchor = sidebarWindow?.querySelector<HTMLElement>(
-          ".rm-sidebar-outline-wrapper",
+          ".rm-sidebar-outline",
         );
         if (anchor && !window["collapsed?"]) attachWorkbench(anchor);
         return;

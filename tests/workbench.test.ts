@@ -476,7 +476,8 @@ test("moving the complete importer to the sidebar preserves draft, preview and n
           });
           const anchor = document.createElement("div");
           anchor.id = `sidebar-window-${id}`;
-          anchor.innerHTML = '<div class="rm-sidebar-outline-wrapper"></div>';
+          anchor.innerHTML =
+            '<div class="rm-sidebar-outline-wrapper"><div class="rm-sidebar-outline"></div></div>';
           document.body.appendChild(anchor);
         },
       },
@@ -612,5 +613,67 @@ test("moving the complete importer to the sidebar preserves draft, preview and n
     article.remove();
     cleanup();
     localStorage.clear();
+  }
+});
+
+test("persisted native-source watch marks preview stale and removes only its own callback on close", async () => {
+  const graph = new MemoryGraph();
+  graph.put("page", "Destination");
+  graph.put("source", "```sparql\nSELECT ?x {}\n```", "page");
+  const previousHost = dom.window.roamAlphaAPI;
+  let callback: (() => void) | undefined;
+  const removed: unknown[][] = [];
+  dom.window.roamAlphaAPI = {
+    ...previousHost,
+    data: {
+      addPullWatch: async (
+        _pattern: string,
+        _entity: string,
+        changed: () => void,
+      ) => {
+        callback = changed;
+      },
+      removePullWatch: async (...args: unknown[]) => {
+        removed.push(args);
+      },
+    },
+  };
+  const ui = mount(graph, {
+    destination: "page",
+    blockUid: "source",
+    sourceUid: "source",
+    mode: "Custom Query",
+  });
+  try {
+    await act(async () =>
+      fireEvent.click(ui.getByRole("button", { name: "Preview", exact: true })),
+    );
+    await waitFor(() =>
+      assert.ok(
+        ui.getByRole("button", {
+          name: "Import previewed results",
+          exact: true,
+        }),
+      ),
+    );
+    await graph.update({
+      uid: "source",
+      text: "```sparql\nSELECT ?changed {}\n```",
+    });
+    await act(async () => callback!());
+    assert.match(
+      ui.getByLabelText("SPARQL result preview").textContent,
+      /Preview is stale/,
+    );
+    assert.ok(ui.getByRole("button", { name: "Import", exact: true }));
+    ui.unmount();
+    assert.equal(removed.length, 1);
+    assert.equal(removed[0][0], "[:block/string]");
+    assert.equal(removed[0][1], '[:block/uid "source"]');
+    assert.equal(removed[0][2], callback);
+  } finally {
+    cleanup();
+    localStorage.clear();
+    dom.window.roamAlphaAPI = previousHost;
   }
 });

@@ -26,3 +26,5 @@ All notable changes are documented here, following [Keep a Changelog](https://ke
 
 - **Large imports** - Plan sibling insertions and grouped results without repeatedly copying large result trees.
 - **Selected labels and dates** - Keep standalone `Label` columns and preserve the stated calendar day of date-only and midnight UTC values.
+
+- **Persisted source changes** - Mark previews stale after native Roam finishes saving an edit, including edits from another placement of the source.

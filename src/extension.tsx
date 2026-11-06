@@ -29,9 +29,10 @@ export default runExtension(async ({ extensionAPI }) => {
     ? COEXISTENCE_WARNING
     : "";
   let dialogMount: HTMLDivElement | undefined;
-  let workspaceMount: HTMLDivElement | undefined;
-  let workspaceLaunch: Launch | undefined;
-  let dialogLaunch: Launch | undefined;
+  let workbenchMount: HTMLDivElement | undefined;
+  let workbenchLaunch: Launch | undefined;
+  let surface: "dialog" | "workspace" | "sidebar" | undefined;
+  let workspaceUid: string | undefined;
   let priorFocus: ReturnType<typeof api.ui.getFocusedBlock>;
   const legacyLabels: string[] = [];
   const menuLabel = "SPARQL: Open query from block";
@@ -44,11 +45,18 @@ export default runExtension(async ({ extensionAPI }) => {
       mounts.delete(mount);
     }
   };
-  const close = (): void => {
-    service.cancel();
+  const closeDialogShell = (): void => {
+    workbenchMount?.remove();
     unmount(dialogMount);
     dialogMount = undefined;
-    dialogLaunch = undefined;
+  };
+  const close = (): void => {
+    service.cancel();
+    unmount(workbenchMount);
+    workbenchMount = undefined;
+    workbenchLaunch = undefined;
+    surface = undefined;
+    closeDialogShell();
     if (priorFocus) api.ui.setBlockFocusAndSelection({ location: priorFocus });
   };
   const context = async (overrides: Partial<Launch> = {}): Promise<Launch> => {
@@ -70,24 +78,92 @@ export default runExtension(async ({ extensionAPI }) => {
       ...overrides,
     };
   };
-  const openWorkspace = async (): Promise<void> => {
-    const original = await context();
-    if (disposed) return;
-    close();
+  const renderWorkbench = (): void => {
+    if (!workbenchMount || !workbenchLaunch) return;
+    ReactDOM.render(
+      <Workbench
+        graph={graph}
+        service={service}
+        launch={workbenchLaunch}
+        wide={surface === "workspace"}
+        inSidebar={surface === "sidebar"}
+        onWorkspace={() => void openWorkspace(true)}
+        onSidebar={() => openSidebar(true)}
+        blocked={blocked}
+      />,
+      workbenchMount,
+    );
+  };
+  const attachWorkbench = (anchor: HTMLElement): void => {
+    if (!workbenchMount) {
+      workbenchMount = document.createElement("div");
+      mounts.add(workbenchMount);
+    }
+    const className =
+      surface === "sidebar"
+        ? "sparql-sidebar-mount"
+        : surface === "workspace"
+          ? "sparql-workspace-mount"
+          : "";
+    if (
+      workbenchMount.parentElement === anchor &&
+      workbenchMount.className === className
+    )
+      return;
+    workbenchMount.className = className;
+    anchor.appendChild(workbenchMount);
+    renderWorkbench();
+  };
+  const ensureWorkspace = async (): Promise<string> => {
     const uid = await graph.ensurePage(WORKSPACE);
-    if (disposed) return;
     if (!graph.read(uid)?.children.length)
       await graph.create({
         uid: graph.uid(),
         parentUid: uid,
         text: "SPARQL workspace · Enable the SPARQL extension to open its query library and native editor. Saved queries remain ordinary blocks on [[roam/js/sparql]].",
       });
-    workspaceLaunch = original;
+    workspaceUid = uid;
+    return uid;
+  };
+  const openWorkspace = async (preserve = false): Promise<void> => {
+    const original =
+      preserve && workbenchLaunch ? workbenchLaunch : await context();
+    const uid = await ensureWorkspace();
+    if (disposed) return;
+    if (preserve) closeDialogShell();
+    else close();
+    workbenchLaunch = original;
+    surface = "workspace";
     await api.ui.mainWindow.openPage({ page: { uid } });
     await syncWorkspace();
   };
+  const openSidebar = async (preserve = false): Promise<void> => {
+    const original =
+      preserve && workbenchLaunch ? workbenchLaunch : await context();
+    try {
+      const uid = await ensureWorkspace();
+      if (disposed) return;
+      await api.ui.rightSidebar.open();
+      await api.ui.rightSidebar.addWindow({
+        window: { type: "outline", "block-uid": uid },
+      });
+      await api.ui.rightSidebar.expandWindow({
+        window: { type: "outline", "block-uid": uid },
+      });
+      if (disposed) return;
+      if (preserve) closeDialogShell();
+      else close();
+      workbenchLaunch = original;
+      surface = "sidebar";
+      await syncWorkspace();
+    } catch (error) {
+      throw new Error(
+        `SPARQL sidebar could not open: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  };
   const renderDialog = (): void => {
-    if (!dialogMount || !dialogLaunch) return;
+    if (!dialogMount || !workbenchLaunch) return;
     ReactDOM.render(
       <Dialog
         isOpen
@@ -99,12 +175,10 @@ export default runExtension(async ({ extensionAPI }) => {
         autoFocus
         enforceFocus={false}
       >
-        <Workbench
-          graph={graph}
-          service={service}
-          launch={dialogLaunch}
-          onWorkspace={() => void openWorkspace()}
-          blocked={blocked}
+        <div
+          ref={(anchor) => {
+            if (anchor) attachWorkbench(anchor);
+          }}
         />
         <div className="sparql-footer">
           Close <kbd>Esc</kbd>
@@ -117,11 +191,9 @@ export default runExtension(async ({ extensionAPI }) => {
     if (disposed) return;
     priorFocus = api.ui.getFocusedBlock();
     close();
-    // One authoring surface owns the controller at a time.
-    unmount(workspaceMount);
-    workspaceMount = undefined;
-    dialogLaunch = await context(overrides);
+    workbenchLaunch = await context(overrides);
     if (disposed) return;
+    surface = "dialog";
     dialogMount = document.createElement("div");
     mounts.add(dialogMount);
     document.body.appendChild(dialogMount);
@@ -184,19 +256,7 @@ export default runExtension(async ({ extensionAPI }) => {
     refreshMounts.forEach(unmount);
     refreshMounts.clear();
     if (runtime.roamjsSparql) runtime.roamjsSparql.state = "standby";
-    renderDialog();
-    if (workspaceMount && workspaceLaunch)
-      ReactDOM.render(
-        <Workbench
-          graph={graph}
-          service={service}
-          launch={workspaceLaunch}
-          wide
-          onWorkspace={() => void openWorkspace()}
-          blocked={blocked}
-        />,
-        workspaceMount,
-      );
+    renderWorkbench();
   };
   const syncRefresh = (): void => {
     refreshMounts.forEach((mount, block) => {
@@ -244,41 +304,45 @@ export default runExtension(async ({ extensionAPI }) => {
   };
   let syncing = false;
   const syncWorkspace = async (): Promise<void> => {
-    if (disposed || syncing || dialogMount) return;
+    if (disposed || syncing || surface === "dialog") return;
     syncing = true;
     try {
+      if (surface === "sidebar") {
+        const window = api.ui.rightSidebar
+          .getWindows()
+          .find(
+            (window) =>
+              window.type === "outline" && window["page-uid"] === workspaceUid,
+          );
+        if (!window) {
+          close();
+          return;
+        }
+        const sidebarWindow = document.getElementById(
+          `sidebar-window-${window["window-id"]}`,
+        );
+        const anchor = sidebarWindow?.querySelector<HTMLElement>(
+          ".rm-sidebar-outline-wrapper",
+        );
+        if (anchor && !window["collapsed?"]) attachWorkbench(anchor);
+        return;
+      }
       const uid = await api.ui.mainWindow.getOpenPageOrBlockUid();
       if (disposed) return;
       if (graph.read(uid || "")?.title !== WORKSPACE) {
-        unmount(workspaceMount);
-        workspaceMount = undefined;
+        if (surface === "workspace") close();
         return;
       }
-      if (workspaceMount?.isConnected) return;
-      unmount(workspaceMount);
-      workspaceMount = undefined;
+      if (workbenchMount?.isConnected) return;
       const title = document.querySelector(".roam-article .rm-title-display");
       const anchor =
-        title?.closest(".roam-article") ||
-        document.querySelector(".roam-article");
+        title?.closest<HTMLElement>(".roam-article") ||
+        document.querySelector<HTMLElement>(".roam-article");
       if (!anchor) return;
-      workspaceLaunch ||= await context();
+      workbenchLaunch ||= await context();
       if (disposed) return;
-      workspaceMount = document.createElement("div");
-      workspaceMount.className = "sparql-workspace-mount";
-      mounts.add(workspaceMount);
-      anchor.appendChild(workspaceMount);
-      ReactDOM.render(
-        <Workbench
-          graph={graph}
-          service={service}
-          launch={workspaceLaunch}
-          wide
-          onWorkspace={() => void openWorkspace()}
-          blocked={blocked}
-        />,
-        workspaceMount,
-      );
+      surface = "workspace";
+      attachWorkbench(anchor);
     } finally {
       syncing = false;
     }
@@ -304,7 +368,11 @@ export default runExtension(async ({ extensionAPI }) => {
   });
   extensionAPI.ui.commandPalette.addCommand({
     label: "SPARQL: Open workspace",
-    callback: openWorkspace,
+    callback: () => openWorkspace(),
+  });
+  extensionAPI.ui.commandPalette.addCommand({
+    label: "SPARQL: Open in sidebar",
+    callback: () => openSidebar(),
   });
   if (!blocked) {
     [
@@ -362,6 +430,12 @@ export default runExtension(async ({ extensionAPI }) => {
       clearInterval(timer);
       document.body.removeEventListener("roamjs:developer:loaded", onLoaded);
       removeLegacy();
+      extensionAPI.ui.commandPalette.removeCommand({
+        label: "SPARQL: Open workspace",
+      });
+      extensionAPI.ui.commandPalette.removeCommand({
+        label: "SPARQL: Open in sidebar",
+      });
       mounts.forEach(unmount);
       style.remove();
       delete runtime.roamjsSparql;

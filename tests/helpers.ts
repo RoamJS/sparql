@@ -7,9 +7,15 @@ export class MemoryGraph implements Graph {
   failAt = Infinity;
   serial = 0;
   beforeWrite?: () => void;
-  read = (uid: string): Tree | undefined => {
+  read: Graph["read"] = (uid, options) => {
     const node = this.nodes.get(uid);
-    return node ? structuredClone(node) : undefined;
+    if (!node) return undefined;
+    return options?.shallow
+      ? {
+          ...node,
+          children: node.children.map((child) => ({ ...child, children: [] })),
+        }
+      : structuredClone(node);
   };
   page = (title: string): Tree | undefined =>
     [...this.nodes.values()].find((node) => node.title === title);

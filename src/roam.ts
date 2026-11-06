@@ -36,6 +36,22 @@ export type Host = {
       openPage: (args: { page: { uid: string } }) => Promise<void>;
       openBlock: (args: { block: { uid: string } }) => Promise<void>;
     };
+    rightSidebar: {
+      open: () => Promise<void>;
+      addWindow: (args: {
+        window: { type: "outline" | "block"; "block-uid": string };
+      }) => Promise<void>;
+      expandWindow: (args: {
+        window: { type: "outline"; "block-uid": string };
+      }) => Promise<void>;
+      getWindows: () => {
+        "window-id": string;
+        "page-uid"?: string;
+        "block-uid"?: string;
+        "collapsed?"?: boolean;
+        type: string;
+      }[];
+    };
     components: {
       unmountNode: (args: { el: HTMLElement }) => Promise<void>;
       renderBlock: (args: {
@@ -79,8 +95,11 @@ const PATTERN =
   "[:block/uid :block/string :node/title :block/order :edit/time {:block/children ...}]";
 export const roamGraph = (): Graph => {
   const api = host();
-  const read = (uid: string): Tree | undefined => {
-    const pull = api.pull(PATTERN, [":block/uid", uid]);
+  const read: Graph["read"] = (uid, options) => {
+    const pattern = options?.shallow
+      ? "[:block/uid :block/string :node/title :block/order :edit/time {:block/children [:block/uid :block/order]}]"
+      : PATTERN;
+    const pull = api.pull(pattern, [":block/uid", uid]);
     return pull ? treeFromPull(pull) : undefined;
   };
   const page = (title: string): Tree | undefined => {

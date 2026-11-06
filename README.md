@@ -9,13 +9,14 @@ This is an unreleased candidate. All inherited publishing workflows are disabled
 - **Run SPARQL Query** opens the compact importer. Choose **Current Page**, **Current Block** or **Custom Query**. Empty blocks use their parent as the block destination. Pages without a first block work directly.
 - **Run SPARQL Query: Custom** resolves a focused query first, then the most recently edited SPARQL source on the open page, then the existing `customQuery` block.
 - **SPARQL: Open focused query** and the block/reference context menu resolve a SPARQL source, a containing parent's source, or a whole-block `((uid))` reference. Cycles and missing sources produce errors. Mixed prose references are not resolved.
+- **SPARQL: Open in sidebar** opens the complete importer in a native right sidebar window, leaving your current page in place. **Open in sidebar** moves an open dialog or workspace there with its draft, preview and native source editor intact. Only one authoring surface controls the query at a time. Closing the sidebar window stops the operation; its fallback graph blocks remain.
 - **SPARQL: Open workspace** opens `roam/js/sparql/workspace`, with a saved query library beside the shared editor and preview. Its ordinary fallback block remains readable while the extension is disabled.
 
 The destination is shown separately from the source. Enter any existing page or block UID. **Import** fetches and validates before writing. **Preview** shows the exact output plan and proposed identity links; **Import previewed results** applies it without another endpoint request. Changing the query, source, settings or destination makes the preview stale. External destination changes also require a new preview.
 
 For Wikidata, search **Item (Q)** or **Property details (P)**, or enter a Q/P identifier. Property details query statements about a P entity; this is separate from **Selected property IDs**, which filters the statements of the selected Q/P entity. **All properties** is the default. The limit counts result rows, including qualifier rows, rather than distinct properties.
 
-Custom queries use the real native Roam block editor. Edits persist in the graph. Open **Query settings** for endpoint, format, label, name and saving. SELECT is supported; ASK, CONSTRUCT, DESCRIBE and SPARQL Update are rejected before requesting.
+Custom queries use the real native Roam block editor. Edits persist in the graph. **Source in sidebar** opens just the source block alongside the importer. Roam currently exposes no supported standalone code-editor component in its public API; the source editor is mounted through `renderBlock` and unmounted on cleanup. Open **Query settings** for endpoint, format, label, name and saving. SELECT is supported; ASK, CONSTRUCT, DESCRIBE and SPARQL Update are rejected before requesting.
 
 ## Existing graph compatibility
 
@@ -40,9 +41,9 @@ roam/js/sparql
     <output-root-uid> <versioned JSON metadata>
 ````
 
-Ordered saved record children and their UIDs are retained. Unknown children are preserved. New names, source links, endpoint mode and ownership live in the separate `standalone/v1` subtree. Legacy endpoints concatenate the prefix with the encoded query; standard mode instead sets `query` and `format=json` URL parameters. Existing saved imports use the compatibility formatter, including legacy grouping by displayed text and broad date recognition. New imports group by entity identity and recognize dates by datatype. Both handle optional/unbound cells safely and format repeated URLs consistently.
+Ordered saved record children and their UIDs are retained. Unknown children are preserved. New names, source links, endpoint mode and ownership live in the separate `standalone/v1` subtree. Legacy endpoints concatenate the prefix with the encoded query; standard mode instead sets `query` and `format=json` URL parameters. Existing saved imports use the compatibility formatter, including legacy grouping by displayed text and broad date recognition. New imports group by entity identity and recognize dates by datatype. Both handle optional/unbound cells safely and format repeated URLs consistently. A selected variable ending in `Label` stays visible when its base variable is absent.
 
-**Known date-rendering defect:** both new typed-date output and legacy-compatible date output pass JavaScript dates through Roam's local date-to-page conversion. Midnight UTC values can shift to the prior calendar day in negative-offset timezones: `1815-12-10T00:00:00Z` displayed December 9th rather than December 10th in verification. This inherited behavior is preserved and needs a compatibility decision before publication; date correctness is not claimed.
+Calendar dates and midnight UTC values such as `1815-12-10T00:00:00Z` keep their stated calendar day in Roam date links, including in negative-offset timezones. Other date-time values continue to use the device's local day. This correction applies to typed dates and recognized legacy dates.
 
 Parent, Line and Table preserve variable order, paired `Label` variables, property attributes, images, links and table headers. `{date}` uses the device's locale. Identity links are added after validated output writes and awaited; existing identical links are not duplicated. Two different entity URIs with the same label can share a Roam page and therefore have multiple `same as::` links.
 

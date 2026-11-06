@@ -50,6 +50,8 @@ export type WorkbenchProps = {
   launch: Launch;
   wide?: boolean;
   onWorkspace: () => void;
+  onSidebar?: () => Promise<void>;
+  inSidebar?: boolean;
   blocked?: string;
 };
 const TreePreview = ({ nodes }: { nodes: Node[] }): React.ReactElement => (
@@ -109,6 +111,8 @@ export const Workbench = ({
   launch,
   wide,
   onWorkspace,
+  onSidebar,
+  inSidebar,
   blocked,
 }: WorkbenchProps): React.ReactElement => {
   const defaults = readDefaults(graph);
@@ -150,6 +154,9 @@ export const Workbench = ({
   const [library, setLibrary] = useState(() => readSaved(graph));
   const [librarySearch, setLibrarySearch] = useState("");
   const [showLibrary, setShowLibrary] = useState(!!wide);
+  useEffect(() => {
+    if (wide) setShowLibrary(true);
+  }, [wide]);
   const [save, setSave] = useState(false);
   const [advanced, setAdvanced] = useState(false);
   const [status, setStatus] = useState(
@@ -668,6 +675,15 @@ export const Workbench = ({
                 onClick={onWorkspace}
                 disabled={busy}
               />
+              {onSidebar && !inSidebar && (
+                <Button
+                  minimal
+                  icon="panel-stats"
+                  text="Open in sidebar"
+                  onClick={() => void onSidebar().catch(fail)}
+                  disabled={busy}
+                />
+              )}
               <Button minimal text="Keep local draft" onClick={persistDraft} />
               {draftAvailable && (
                 <Button
@@ -861,6 +877,24 @@ export const Workbench = ({
                         void host().ui.mainWindow.openBlock({
                           block: { uid: sourceUid },
                         })
+                      }
+                    />
+                    <Button
+                      minimal
+                      text="Source in sidebar"
+                      icon="panel-stats"
+                      disabled={!sourceUid}
+                      onClick={() =>
+                        void (async (): Promise<void> => {
+                          try {
+                            await host().ui.rightSidebar.open();
+                            await host().ui.rightSidebar.addWindow({
+                              window: { type: "block", "block-uid": sourceUid },
+                            });
+                          } catch (caught) {
+                            fail(caught);
+                          }
+                        })()
                       }
                     />
                     <Button

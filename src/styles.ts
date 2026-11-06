@@ -12,6 +12,7 @@ export const CSS = `
 .sparql-preview .bp3-callout{margin-bottom:8px}.sparql-status{margin:8px 0}.sparql-actions{justify-content:flex-end;padding:8px 16px;border-top:1px solid #d3d8dc;flex-shrink:0}.sparql-workbench pre{max-height:200px;overflow:auto;font-size:11px;white-space:pre-wrap}
 .sparql-footer{height:30px;box-sizing:border-box;background:#ebeceb;border-top:1px solid #d3d4d4;padding:3px 8px;display:flex;align-items:center;justify-content:flex-end;font-size:12px;color:#394b59}
 .sparql-footer kbd{background:#0001;border-radius:2px;padding:1px 4px;font-size:10px;margin-left:6px}.sparql-wide .sparql-main{max-height:none}.sparql-workspace-mount{margin:20px 0}
+.sparql-sidebar-mount{margin:12px 0;min-width:0}.sparql-sidebar-mount .sparql-main{max-height:none}.sparql-sidebar-mount .sparql-layout{grid-template-columns:minmax(0,1fr)}.sparql-sidebar-mount .sparql-library{border-right:0;border-bottom:1px solid #d3d8dc}.sparql-sidebar-mount .sparql-library-results{min-height:40px;max-height:140px}.sparql-sidebar-mount .sparql-inline>.bp3-label{max-width:100%}
 .bp3-dark .sparql-footer{background:#293742;color:#f5f8fa}.bp3-dark .sparql-dialog .sparql-workbench{background:#30404d}.bp3-dark .sparql-library,.bp3-dark .sparql-preview,.bp3-dark .sparql-native-source,.bp3-dark .sparql-entities{border-color:#5c7080}
 @media(max-width:680px){.sparql-layout{grid-template-columns:1fr}.sparql-library{border-right:0;border-bottom:1px solid #d3d8dc}.sparql-library-results{min-height:40px;max-height:110px}.sparql-main{max-height:65vh}.sparql-library h4{margin:0 0 8px}}
 `;

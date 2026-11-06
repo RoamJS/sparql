@@ -10,6 +10,8 @@ All notable changes are documented here, following [Keep a Changelog](https://ke
 - **Native query workspace** - Edit graph-backed queries, search saved imports, choose a destination, and preview proposed output before importing.
 - **Focused queries and properties** - Open query blocks and references from commands or context menus; look up Wikidata properties and select the properties to import.
 
+- **Sidebar importer** - Move the complete dialog or workspace into a native right sidebar window while keeping its query draft and preview; optionally open only the source block there.
+
 ### Changed
 
 - **Safer refresh** - Preserve edited and referenced blocks, adopt matching legacy output in place, and offer an adjacent copy when legacy ownership is uncertain.
@@ -21,3 +23,6 @@ All notable changes are documented here, following [Keep a Changelog](https://ke
 
 - **Refresh consistency** - Insert new sorted output and table headers in place, stop between saved-record writes, and clear obsolete recovery after a successful retry.
 - **Native source switching** - Reopen source editors correctly after changing query blocks or copying saved definitions.
+
+- **Large imports** - Plan sibling insertions and grouped results without repeatedly copying large result trees.
+- **Selected labels and dates** - Keep standalone `Label` columns and preserve the stated calendar day of date-only and midnight UTC values.

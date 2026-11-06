@@ -384,3 +384,233 @@ test("own refresh timestamps do not look like an external saved-definition edit"
     localStorage.clear();
   }
 });
+
+test("moving the complete importer to the sidebar preserves draft, preview and native editor; closing cleans up", async () => {
+  const previousHost = dom.window.roamAlphaAPI;
+  const graph = new MemoryGraph();
+  graph.put("page", "Destination");
+  graph.nodes.get("page")!.title = "Destination";
+  graph.put("source", "```sparql\nSELECT ?x {}\n```", "page");
+  let currentUid = "page";
+  const commands = new Map<string, () => Promise<void>>();
+  const windows: { type: string; "window-id": string; "page-uid": string }[] =
+    [];
+  let mounts = 0,
+    unmounts = 0;
+  const article = document.createElement("div");
+  article.className = "roam-article";
+  document.body.appendChild(article);
+  const toPull = (node: ReturnType<MemoryGraph["read"]>): unknown =>
+    node && {
+      ":block/uid": node.uid,
+      ":block/string": node.text,
+      ":node/title": node.title,
+      ":block/children": node.children.map(toPull),
+    };
+  dom.window.roamAlphaAPI = {
+    graph: { name: "sidebar-regression" },
+    pull: (_pattern: string, [attribute, value]: string[]) =>
+      toPull(
+        attribute === ":node/title" ? graph.page(value) : graph.read(value),
+      ),
+    q: (_query: string, uid: string) => graph.parent(uid),
+    createPage: async ({
+      page,
+    }: {
+      page: { uid: string; title: string };
+    }): Promise<void> => {
+      graph.put(page.uid, page.title);
+      graph.nodes.get(page.uid)!.title = page.title;
+    },
+    createBlock: async ({
+      location,
+      block,
+    }: {
+      location: { "parent-uid": string; order: number };
+      block: { uid: string; string: string };
+    }): Promise<void> => {
+      await graph.create({
+        uid: block.uid,
+        parentUid: location["parent-uid"],
+        text: block.string,
+        order: location.order,
+      });
+    },
+    updateBlock: async ({
+      block,
+    }: {
+      block: { uid: string; string: string };
+    }): Promise<void> => graph.update({ uid: block.uid, text: block.string }),
+    util: {
+      generateUID: graph.uid,
+      dateToPageTitle: () => "date",
+      dateToPageUid: () => "date",
+    },
+    ui: {
+      getFocusedBlock: () => null,
+      setBlockFocusAndSelection: () => {},
+      mainWindow: {
+        getOpenPageOrBlockUid: async () => currentUid,
+        openPage: async ({ page }: { page: { uid: string } }) => {
+          currentUid = page.uid;
+          article.innerHTML = '<h1 class="rm-title-display"></h1>';
+        },
+        openBlock: async () => {},
+      },
+      rightSidebar: {
+        open: async () => {},
+        getWindows: () => windows,
+        expandWindow: async () => {},
+        addWindow: async ({
+          window,
+        }: {
+          window: { type: string; "block-uid": string };
+        }) => {
+          if (windows.some((w) => w["page-uid"] === window["block-uid"]))
+            return;
+          const id = `outline-${window["block-uid"]}`;
+          windows.push({
+            type: window.type,
+            "window-id": id,
+            "page-uid": window["block-uid"],
+          });
+          const anchor = document.createElement("div");
+          anchor.id = `sidebar-window-${id}`;
+          anchor.innerHTML = '<div class="rm-sidebar-outline-wrapper"></div>';
+          document.body.appendChild(anchor);
+        },
+      },
+      components: {
+        renderBlock: async () => {
+          mounts++;
+        },
+        unmountNode: async () => {
+          unmounts++;
+        },
+      },
+      blockContextMenu: { addCommand: () => {}, removeCommand: () => {} },
+      blockRefContextMenu: { addCommand: () => {}, removeCommand: () => {} },
+    },
+  };
+  dom.window.roamjs = { loaded: new Set() };
+  const modulePath = require.resolve("roamjs-components/util/runExtension");
+  const priorModule = require.cache[modulePath];
+  require.cache[modulePath] = {
+    id: modulePath,
+    filename: modulePath,
+    loaded: true,
+    exports: { __esModule: true, default: (run: unknown) => run },
+  };
+  const runExtension = require("./src/extension.tsx").default;
+  let runtime: { unload: () => void } | undefined;
+  try {
+    runtime = await runExtension({
+      extensionAPI: {
+        settings: { panel: { create: () => {} } },
+        ui: {
+          commandPalette: {
+            addCommand: ({
+              label,
+              callback,
+            }: {
+              label: string;
+              callback: () => Promise<void>;
+            }) => commands.set(label, callback),
+            removeCommand: ({ label }: { label: string }) =>
+              commands.delete(label),
+          },
+        },
+      },
+    });
+    await act(async () =>
+      dom.window.roamjsSparql.open({
+        destination: "page",
+        blockUid: "source",
+        sourceUid: "source",
+        mode: "Custom Query",
+      }),
+    );
+    const { getByRole, getByLabelText } =
+      require("@testing-library/react").screen;
+    fireEvent.click(
+      getByRole("button", { name: "Query settings", exact: true }),
+    );
+    fireEvent.change(getByLabelText("Import label", { exact: true }), {
+      target: { value: "Retained draft" },
+    });
+    await act(async () =>
+      fireEvent.click(getByRole("button", { name: "Preview", exact: true })),
+    );
+    await waitFor(() =>
+      assert.match(getByRole("status").textContent, /Preview ready/),
+    );
+    const native = document.querySelector(".sparql-native-source");
+    await act(async () =>
+      fireEvent.click(
+        getByRole("button", { name: "Open in sidebar", exact: true }),
+      ),
+    );
+    await waitFor(() =>
+      assert.ok(document.querySelector(".sparql-sidebar-mount")),
+    );
+    assert.equal(
+      document.querySelectorAll('[data-testid="sparql-workbench"]').length,
+      1,
+    );
+    assert.equal(
+      getByLabelText("Import label", { exact: true }).value,
+      "Retained draft",
+    );
+    assert.match(getByRole("status").textContent, /Preview ready/);
+    assert.ok(
+      document.querySelector(".sparql-native-source") === native,
+      "native editor root identity retained",
+    );
+    assert.equal(currentUid, "page");
+    assert.equal(mounts, 1);
+    assert.equal(unmounts, 0);
+    await act(async () =>
+      fireEvent.click(getByRole("button", { name: "Workspace", exact: true })),
+    );
+    await waitFor(() =>
+      assert.ok(document.querySelector(".sparql-workspace-mount")),
+    );
+    assert.ok(
+      document.querySelector(".sparql-native-source") === native,
+      "native editor root identity retained",
+    );
+    assert.equal(
+      getByLabelText("Import label", { exact: true }).value,
+      "Retained draft",
+    );
+    await act(async () =>
+      fireEvent.click(
+        getByRole("button", { name: "Open in sidebar", exact: true }),
+      ),
+    );
+    await waitFor(() =>
+      assert.ok(document.querySelector(".sparql-sidebar-mount")),
+    );
+    currentUid = "page";
+    windows.splice(0);
+    await waitFor(
+      () =>
+        assert.ok(!document.querySelector('[data-testid="sparql-workbench"]')),
+      { timeout: 1500 },
+    );
+    assert.equal(unmounts, 1);
+    runtime.unload();
+    runtime = undefined;
+    assert.equal(commands.size, 0);
+  } finally {
+    runtime?.unload();
+    require.cache[modulePath] = priorModule;
+    dom.window.roamAlphaAPI = previousHost;
+    document
+      .querySelectorAll('[id^="sidebar-window-"]')
+      .forEach((el) => el.remove());
+    article.remove();
+    cleanup();
+    localStorage.clear();
+  }
+});

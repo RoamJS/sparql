@@ -29,8 +29,13 @@ export const planOutput = ({
   compatibility?: boolean;
   dateTitle: (date: Date) => string;
 }): Plan => {
-  const vars = result.head.vars.filter((v) => !v.endsWith("Label"));
-  const labels = new Set(result.head.vars.filter((v) => v.endsWith("Label")));
+  const selected = new Set(result.head.vars);
+  const labels = new Set(
+    result.head.vars.filter(
+      (v) => v.endsWith("Label") && selected.has(v.slice(0, -5)),
+    ),
+  );
+  const vars = result.head.vars.filter((v) => !labels.has(v));
   const formatCell = (row: Record<string, Cell>, variable: string): string => {
     const base = row[variable];
     const paired = labels.has(`${variable}Label`);
@@ -41,7 +46,19 @@ export const planOutput = ({
     if (isUrl(s)) return `[${s}](${s})`;
     if (paired && /entity\/P\d+$/.test(base?.value || "")) return `${s}::`;
     if (/^\d+$/.test(s)) return s;
+    const calendarDate =
+      /^([+-]?\d{4,})-(\d{2})-(\d{2})(?:$|T00:00:00(?:\.0+)?(?:Z|\+00:00)$)/.exec(
+        s,
+      );
     const date = new Date(s);
+    if (calendarDate && !Number.isNaN(date.valueOf())) {
+      date.setFullYear(
+        Number(calendarDate[1]),
+        Number(calendarDate[2]) - 1,
+        Number(calendarDate[3]),
+      );
+      date.setHours(12, 0, 0, 0);
+    }
     const typedDate = /#(?:date|dateTime)$/.test(base?.datatype || "");
     if ((compatibility || typedDate) && !Number.isNaN(date.valueOf()))
       return `[[${dateTitle(date)}]]`;
@@ -49,6 +66,8 @@ export const planOutput = ({
     return s;
   };
   const roots: Node[] = [];
+  const grouped = new WeakMap<Node[], Map<string, Node>>();
+  const lineKeys = new Set<string>();
   result.results.bindings.forEach((row) => {
     const cells = vars.map((variable) => ({
       text: formatCell(row, variable),
@@ -59,8 +78,10 @@ export const planOutput = ({
     if (format === "Line") {
       const text = cells.map((cell) => cell.text).join(" ");
       const key = cells.map((cell) => cell.key).join("|");
-      if (!roots.some((node) => node.key === key))
+      if (!lineKeys.has(key)) {
+        lineKeys.add(key);
         roots.push({ key, text, children: [] });
+      }
       return;
     }
     let level = roots;
@@ -69,10 +90,16 @@ export const planOutput = ({
       .filter((cell) => cell.text)
       .forEach((cell) => {
         prefix += `/${cell.key}`;
-        let node = level.find((candidate) => candidate.key === prefix);
+        let group = grouped.get(level);
+        if (!group) {
+          group = new Map();
+          grouped.set(level, group);
+        }
+        let node = group.get(prefix);
         if (!node) {
           node = { key: prefix, text: cell.text, children: [] };
           level.push(node);
+          group.set(prefix, node);
         }
         level = node.children;
       });

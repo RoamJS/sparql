@@ -215,3 +215,111 @@ test("refresh inserts new sorted siblings and Table header without moving existi
   );
   assert.ok(outcome.changes.every((c) => c.kind === "create"));
 });
+
+test("10,000 new siblings use bounded shallow reads and preserve ordering", async () => {
+  const graph = setup();
+  const expectedRevision = revision(graph, "root");
+  const read = graph.read;
+  let recursiveReads = 0;
+  let shallowReads = 0;
+  graph.read = (uid, options) => {
+    options?.shallow ? shallowReads++ : recursiveReads++;
+    return read(uid, options);
+  };
+  const nodes = Array.from({ length: 10000 }, (_, i) => ({
+    key: String(i),
+    text: String(i),
+    children: [],
+  }));
+  const result = await applyPlan({
+    graph,
+    rootUid: "root",
+    plan: { nodes, rows: nodes.length, identities: [], warnings: [] },
+    signal: new AbortController().signal,
+    expectedRevision,
+  });
+  assert.equal(result.status, "complete");
+  assert.equal(result.changes.length, 10000);
+  assert.equal(recursiveReads, 2);
+  assert.equal(shallowReads, 1);
+  assert.deepEqual(
+    graph.nodes.get("root")!.children.map((node) => node.text),
+    nodes.map((node) => node.text),
+  );
+});
+
+test("inserting before many retained siblings reads each owned block shallowly", async () => {
+  const graph = setup();
+  graph.put("b", "Beta", "root");
+  graph.put("g", "Gamma", "root");
+  const meta: ImportMeta = {
+    version: 1,
+    rootUid: "root",
+    name: "Test",
+    endpointMode: "prefix",
+    compatibility: false,
+    label: "Import",
+    owned: [
+      { key: "b", uid: "b", parentUid: "root", text: "Beta" },
+      { key: "g", uid: "g", parentUid: "root", text: "Gamma" },
+    ],
+  };
+  const nodes = Array.from({ length: 5000 }, (_, i) => ({
+    key: `a${i}`,
+    text: `Alpha ${i}`,
+    children: [],
+  }));
+  nodes.push(
+    { key: "b", text: "Beta", children: [] },
+    { key: "g", text: "Gamma", children: [] },
+  );
+  const result = await applyPlan({
+    graph,
+    rootUid: "root",
+    plan: { nodes, rows: nodes.length, identities: [], warnings: [] },
+    meta,
+    signal: new AbortController().signal,
+    expectedRevision: revision(graph, "root"),
+  });
+  assert.equal(result.status, "complete");
+  assert.deepEqual(
+    graph.nodes.get("root")!.children.map((n) => n.text),
+    nodes.map((n) => n.text),
+  );
+  assert.equal(graph.nodes.get("root")!.children.at(-2)!.uid, "b");
+});
+
+test("refresh preserves an owned block edited while earlier writes await", async () => {
+  const graph = setup();
+  graph.put("b", "Beta", "root");
+  graph.beforeWrite = () => {
+    graph.nodes.get("b")!.text = "Edited during import";
+  };
+  const result = await applyPlan({
+    graph,
+    rootUid: "root",
+    plan: {
+      nodes: [
+        { key: "a", text: "Alpha", children: [] },
+        { key: "b", text: "New Beta", children: [] },
+      ],
+      rows: 2,
+      identities: [],
+      warnings: [],
+    },
+    meta: {
+      version: 1,
+      rootUid: "root",
+      name: "Test",
+      endpointMode: "prefix",
+      compatibility: false,
+      label: "Import",
+      owned: [{ key: "b", uid: "b", parentUid: "root", text: "Beta" }],
+    },
+    signal: new AbortController().signal,
+    expectedRevision: revision(graph, "root"),
+  });
+  assert.equal(result.status, "complete");
+  assert.equal(graph.read("b")!.text, "Edited during import");
+  assert.deepEqual(result.retained, ["b"]);
+});

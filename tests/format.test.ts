@@ -141,3 +141,99 @@ test("labels retain date placeholder and table macro", () => {
     `Run ${date.toLocaleString()} {{[[table]]}}`,
   );
 });
+
+test("unpaired Label columns remain ordinary output in every format", () => {
+  const unpaired: Result = {
+    head: { vars: ["displayLabel"] },
+    results: {
+      bindings: [{ displayLabel: { type: "literal", value: "Ada" } }],
+    },
+  };
+  for (const format of ["Parent", "Line", "Table"] as const) {
+    const plan = planOutput({ result: unpaired, format, dateTitle });
+    assert.equal(plan.rows, 1);
+    assert.equal(plan.nodes.at(-1)!.text, "Ada");
+    assert.deepEqual(plan.identities, []);
+    if (format === "Table") assert.equal(plan.nodes[0].text, "displayLabel");
+  }
+  const mixed: Result = {
+    head: { vars: ["x", "xLabel", "displayLabel"] },
+    results: {
+      bindings: [
+        {
+          x: { type: "uri", value: "entity1" },
+          xLabel: { type: "literal", value: "Paired" },
+          displayLabel: { type: "literal", value: "Standalone" },
+        },
+      ],
+    },
+  };
+  const table = planOutput({ result: mixed, format: "Table", dateTitle });
+  assert.equal(table.nodes[0].text, "x");
+  assert.equal(table.nodes[0].children[0].text, "displayLabel");
+  assert.equal(table.nodes[1].children[0].text, "Standalone");
+});
+
+test("calendar dates and midnight UTC Wikidata dates retain their calendar day across timezones", () => {
+  const previous = process.env.TZ;
+  try {
+    for (const timezone of [
+      "America/Regina",
+      "America/Los_Angeles",
+      "UTC",
+      "Pacific/Auckland",
+    ]) {
+      process.env.TZ = timezone;
+      for (const compatibility of [false, true]) {
+        const dates: Result = {
+          head: { vars: ["birth"] },
+          results: {
+            bindings: ["1815-12-10", "1815-12-10T00:00:00Z"].map((value) => ({
+              birth: {
+                type: "literal",
+                datatype: "http://www.w3.org/2001/XMLSchema#dateTime",
+                value,
+              },
+            })),
+          },
+        };
+        const plan = planOutput({
+          result: dates,
+          format: "Parent",
+          compatibility,
+          dateTitle: (date) =>
+            `${date.getFullYear()}-${date.getMonth() + 1}-${date.getDate()}`,
+        });
+        assert.ok(
+          plan.nodes.every((n) => n.text === "[[1815-12-10]]"),
+          timezone,
+        );
+      }
+      const instant: Result = {
+        head: { vars: ["time"] },
+        results: {
+          bindings: [
+            {
+              time: {
+                type: "literal",
+                datatype: "http://www.w3.org/2001/XMLSchema#dateTime",
+                value: "2026-11-06T01:00:00Z",
+              },
+            },
+          ],
+        },
+      };
+      assert.equal(
+        planOutput({
+          result: instant,
+          format: "Parent",
+          dateTitle: (date) => String(date.getDate()),
+        }).nodes[0].text,
+        `[[${new Date("2026-11-06T01:00:00Z").getDate()}]]`,
+      );
+    }
+  } finally {
+    if (previous === undefined) delete process.env.TZ;
+    else process.env.TZ = previous;
+  }
+});

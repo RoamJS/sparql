@@ -1,4 +1,5 @@
-import { Graph, ImportMeta, Journal, Node, Owned, Plan } from "~/types";
+import { insertionOrders } from "~/siblingOrder";
+import { Graph, ImportMeta, Journal, Node, Plan } from "~/types";
 
 export const revision = (graph: Graph, uid: string): string =>
   JSON.stringify(graph.read(uid));
@@ -45,23 +46,47 @@ export const applyPlan = async ({
         "Destination changed since preview. Preview again before importing.",
       );
     const write = async (nodes: Node[], parentUid: string): Promise<void> => {
-      let precedingUid: string | undefined;
-      for (const [index, node] of nodes.entries()) {
+      if (!nodes.length) return;
+      const entries = nodes.map((node) => {
         check();
         const old = previous.get(node.key);
-        const current = old && graph.read(old.uid);
+        const current = old && graph.read(old.uid, { shallow: true });
+        return {
+          node,
+          old,
+          current,
+          uid: old?.uid || graph.uid(),
+          existing: !!current,
+          header: node.key.startsWith("header:"),
+          retained:
+            !!old &&
+            (!current ||
+              current.text !== old.text ||
+              graph.parent(old.uid) !== parentUid),
+        };
+      });
+      const orders = insertionOrders({
+        siblings:
+          graph
+            .read(parentUid, { shallow: true })
+            ?.children.map((child) => child.uid) || [],
+        entries,
+      });
+      for (const { node, old, uid, retained } of entries) {
+        check();
         seen.add(node.key);
+        const current = old && graph.read(uid, { shallow: true });
         if (
           old &&
-          (!current ||
+          (retained ||
+            !current ||
             current.text !== old.text ||
-            graph.parent(old.uid) !== parentUid)
+            graph.parent(uid) !== parentUid)
         ) {
           journal.retained.push(old.uid);
           journal.owned.push(old);
           continue;
         }
-        const uid = old?.uid || graph.uid();
         if (current && current.text !== node.text) {
           await graph.update({ uid, text: node.text });
           journal.changes.push({
@@ -72,32 +97,12 @@ export const applyPlan = async ({
             after: node.text,
           });
         } else if (!current) {
-          const siblings = graph.read(parentUid)?.children || [];
-          const following = nodes
-            .slice(index + 1)
-            .map((next) => previous.get(next.key))
-            .find((next) => {
-              const candidate = next && graph.read(next.uid);
-              return (
-                next &&
-                candidate?.text === next.text &&
-                graph.parent(next.uid) === parentUid
-              );
-            });
-          const followingIndex = following
-            ? siblings.findIndex((sibling) => sibling.uid === following.uid)
-            : -1;
-          const precedingIndex = siblings.findIndex(
-            (sibling) => sibling.uid === precedingUid,
-          );
-          const order = node.key.startsWith("header:")
-            ? 0
-            : followingIndex >= 0
-              ? followingIndex
-              : precedingIndex >= 0
-                ? precedingIndex + 1
-                : siblings.length;
-          await graph.create({ uid, parentUid, text: node.text, order });
+          await graph.create({
+            uid,
+            parentUid,
+            text: node.text,
+            order: orders.get(uid),
+          });
           journal.changes.push({
             kind: "create",
             uid,
@@ -105,7 +110,6 @@ export const applyPlan = async ({
             after: node.text,
           });
         }
-        precedingUid = uid;
         journal.owned.push({ uid, parentUid, key: node.key, text: node.text });
         onProgress?.(journal.changes.length);
         await write(node.children, uid);

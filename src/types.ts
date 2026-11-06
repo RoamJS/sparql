@@ -75,7 +75,7 @@ export type Journal = {
   owned: Owned[];
 };
 export type Graph = {
-  read: (uid: string) => Tree | undefined;
+  read: (uid: string, options?: { shallow?: boolean }) => Tree | undefined;
   page: (title: string) => Tree | undefined;
   parent: (uid: string) => string | undefined;
   uid: () => string;

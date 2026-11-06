@@ -256,3 +256,106 @@ test("cancellation during metadata write prevents subsequent saved-definition wr
     globalThis.fetch = original;
   }
 });
+
+test("recovery holds the import lock through awaited writes and cancellation, then releases it", async () => {
+  const { graph, service } = setup();
+  graph.put("first", "After first", "page");
+  graph.put("second", "After second", "page");
+  const journal = {
+    status: "partial" as const,
+    owned: [],
+    retained: [],
+    changes: [
+      {
+        kind: "update" as const,
+        uid: "first",
+        parentUid: "page",
+        before: "Before first",
+        after: "After first",
+      },
+      {
+        kind: "update" as const,
+        uid: "second",
+        parentUid: "page",
+        before: "Before second",
+        after: "After second",
+      },
+    ],
+  };
+  let release = (): void => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const update = graph.update;
+  graph.update = async (args) => {
+    await held;
+    await update(args);
+  };
+  const pending = service.recover(journal);
+  assert.equal(service.busy(), true);
+  await assert.rejects(service.recover(journal), /already running/);
+  await assert.rejects(
+    service.preview({
+      query,
+      destination: "page",
+      signature: "locked",
+      label: "Import",
+      name: "",
+      save: false,
+    }),
+    /already running/,
+  );
+  await assert.rejects(
+    service.import({
+      preview: {
+        plan: { nodes: [], identities: [], rows: 0, warnings: [] },
+        query,
+        destination: "page",
+        destinationRevision: "",
+        signature: "locked",
+        legacyCopy: false,
+        label: "Import",
+        name: "",
+        save: false,
+      },
+      currentSignature: "locked",
+    }),
+    /already running/,
+  );
+  service.cancel();
+  assert.equal(service.busy(), true);
+  release();
+  await assert.rejects(pending, /Recovery stopped/);
+  assert.equal(service.busy(), false);
+  assert.equal(graph.read("second")!.text, "Before second");
+  assert.equal(graph.read("first")!.text, "After first");
+  graph.update = update;
+  const completed = await service.recover(journal);
+  assert.deepEqual(completed.recovered, ["first"]);
+  assert.equal(service.busy(), false);
+});
+
+test("failed recovery releases the operation lock for a safe retry", async () => {
+  const { graph, service } = setup();
+  graph.put("output", "Created", "page");
+  graph.failAt = 1;
+  const journal = {
+    status: "partial" as const,
+    owned: [],
+    retained: [],
+    changes: [
+      {
+        kind: "create" as const,
+        uid: "output",
+        parentUid: "page",
+        after: "Created",
+      },
+    ],
+  };
+  await assert.rejects(service.recover(journal), /Injected/);
+  assert.equal(service.busy(), false);
+  assert.ok(graph.read("output"));
+  const outcome = await service.recover(journal);
+  assert.deepEqual(outcome.recovered, ["output"]);
+  assert.equal(service.busy(), false);
+});

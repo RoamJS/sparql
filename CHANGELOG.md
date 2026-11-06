@@ -30,3 +30,5 @@ All notable changes are documented here, following [Keep a Changelog](https://ke
 - **Persisted source changes** - Mark previews stale after native Roam finishes saving an edit, including edits from another placement of the source.
 
 - **Preview refresh and empty table cells** - Rebuild explicit previews after destination edits and preserve empty or unbound columns in Table output.
+
+- **Recovery concurrency** - Keep recovery and imports serialized, disable overlapping actions and stop between recovery writes.

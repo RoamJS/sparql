@@ -132,15 +132,21 @@ export const applyPlan = async ({
 export const recover = async ({
   graph,
   journal,
+  signal,
 }: {
   graph: Graph;
   journal: Journal;
+  signal?: AbortSignal;
 }): Promise<{ recovered: string[]; retained: string[] }> => {
   const result: { recovered: string[]; retained: string[] } = {
     recovered: [],
     retained: [],
   };
   for (const change of journal.changes.slice().reverse()) {
+    if (signal?.aborted)
+      throw new Error(
+        "Recovery stopped. Completed recovery writes remain; review the operation journal.",
+      );
     const current = graph.read(change.uid);
     if (!current) continue;
     if (

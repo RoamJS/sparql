@@ -33,7 +33,6 @@ import {
   sourceQuery,
 } from "~/storage";
 import { Graph, Journal, Node, OutputFormat, Query, Saved } from "~/types";
-import { recover } from "~/writer";
 
 export type Launch = {
   destination: string;
@@ -1130,8 +1129,13 @@ export const Workbench = ({
                   text="Recover unchanged output writes"
                   disabled={busy || !!blocked}
                   onClick={async () => {
+                    if (busy || blocked || service.busy()) return;
+                    setBusy(true);
+                    setError(false);
+                    setStatus("Recovering unchanged output writes…");
                     try {
-                      const recovered = await recover({ graph, journal });
+                      const recovered = await service.recover(journal);
+                      if (!mounted.current) return;
                       setStatus(
                         `Recovered ${recovered.recovered.length} output writes; retained ${recovered.retained.length} changed or referenced blocks. Identity links and saved metadata require manual review.`,
                       );
@@ -1139,7 +1143,9 @@ export const Workbench = ({
                       localStorage.removeItem(journalKey);
                       refreshLibrary();
                     } catch (caught) {
-                      fail(caught);
+                      if (mounted.current) fail(caught);
+                    } finally {
+                      if (mounted.current) setBusy(false);
                     }
                   }}
                 />

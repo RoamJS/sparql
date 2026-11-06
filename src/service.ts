@@ -12,7 +12,7 @@ import {
   Saved,
   Tree,
 } from "~/types";
-import { applyPlan, revision, writeIdentities } from "~/writer";
+import { applyPlan, recover, revision, writeIdentities } from "~/writer";
 
 export type Preview = {
   plan: Plan;
@@ -87,6 +87,25 @@ export class QueryService {
   ) {}
   cancel = (): void => this.active?.abort();
   busy = (): boolean => !!this.active;
+  recover = async (
+    journal: Journal,
+  ): Promise<{ recovered: string[]; retained: string[] }> => {
+    if (this.active)
+      throw new Error(
+        "An operation is already running. Wait or stop it first.",
+      );
+    const controller = new AbortController();
+    this.active = controller;
+    try {
+      return await recover({
+        graph: this.graph,
+        journal,
+        signal: controller.signal,
+      });
+    } finally {
+      if (this.active === controller) this.active = undefined;
+    }
+  };
   preview = async ({
     query,
     destination,

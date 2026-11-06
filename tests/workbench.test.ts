@@ -741,3 +741,85 @@ test("explicit Preview recaptures a changed destination revision and previewed i
     globalThis.fetch = previousFetch;
   }
 });
+
+test("recovery disables overlapping UI actions until its graph write finishes", async () => {
+  const graph = new MemoryGraph();
+  graph.put("page", "Destination");
+  graph.put("source", "```sparql\nSELECT ?x {}\n```", "page");
+  graph.put("output", "After", "page");
+  localStorage.setItem(
+    "roamjs:sparql:v1:workbench-regression:journal",
+    JSON.stringify({
+      status: "partial",
+      owned: [],
+      retained: [],
+      changes: [
+        {
+          kind: "update",
+          uid: "output",
+          parentUid: "page",
+          before: "Before",
+          after: "After",
+        },
+      ],
+    }),
+  );
+  let release = (): void => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const update = graph.update;
+  graph.update = async (args) => {
+    await held;
+    await update(args);
+  };
+  const service = new QueryService(graph, () => "");
+  const ui = mount(
+    graph,
+    {
+      destination: "page",
+      blockUid: "source",
+      sourceUid: "source",
+      mode: "Custom Query",
+    },
+    service,
+  );
+  try {
+    fireEvent.click(ui.getByText(/Operation journal/));
+    await act(async () =>
+      fireEvent.click(
+        ui.getByRole("button", {
+          name: "Recover unchanged output writes",
+          exact: true,
+        }),
+      ),
+    );
+    assert.equal(service.busy(), true);
+    assert.equal(
+      ui.getByRole("button", {
+        name: "Recover unchanged output writes",
+        exact: true,
+      }).disabled,
+      true,
+    );
+    assert.equal(
+      ui.queryByRole("button", { name: "Import", exact: true }),
+      null,
+    );
+    assert.ok(ui.getByRole("button", { name: "Stop", exact: true }));
+    await act(async () => release());
+    await waitFor(() =>
+      assert.match(
+        ui.getByRole("status").textContent,
+        /Recovered 1 output writes/,
+      ),
+    );
+    assert.equal(service.busy(), false);
+    assert.equal(graph.read("output")!.text, "Before");
+    assert.ok(ui.getByRole("button", { name: "Import", exact: true }));
+  } finally {
+    release();
+    cleanup();
+    localStorage.clear();
+  }
+});

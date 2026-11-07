@@ -72,10 +72,43 @@ test("Line keeps delimiter collisions distinct and deduplicates exact rows", () 
     });
     assert.equal(output.nodes.length, 2);
     assert.equal(
-      output.nodes[0].legacyLineKey?.key,
-      output.nodes[1].legacyLineKey?.key,
+      output.nodes[0].legacyKey?.key,
+      output.nodes[1].legacyKey?.key,
     );
     assert.notEqual(output.nodes[0].key, output.nodes[1].key);
+  }
+});
+
+test("Parent and Table preserve distinct nested cells with colliding legacy identities", () => {
+  const result: Result = {
+    head: { vars: ["group", "item"] },
+    results: {
+      bindings: [
+        {
+          group: { type: "literal", value: "Items" },
+          item: { type: "literal", value: "x:http://example.org/t" },
+        },
+        {
+          group: { type: "literal", value: "Items" },
+          item: {
+            type: "literal",
+            value: "x",
+            datatype: "http://example.org/t:",
+          },
+        },
+      ],
+    },
+  };
+  for (const format of ["Parent", "Table"] as const) {
+    const output = planOutput({ result, format, dateTitle });
+    const items =
+      output.nodes.find((node) => node.text === "Items")?.children || [];
+    assert.deepEqual(
+      items.map((node) => node.text),
+      ["x", "x:http://example.org/t"],
+    );
+    assert.equal(items[0].legacyKey?.key, items[1].legacyKey?.key);
+    assert.notEqual(items[0].key, items[1].key);
   }
 });
 

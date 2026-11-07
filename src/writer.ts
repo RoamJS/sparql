@@ -4,39 +4,38 @@ import { Graph, ImportMeta, Journal, Node, Owned, Plan } from "~/types";
 export const revision = (graph: Graph, uid: string): string =>
   JSON.stringify(graph.read(uid));
 
-const matchLegacyLines = ({
+const matchLegacyKeys = ({
   nodes,
-  parentUid,
-  previous,
-  linePrevious,
+  legacyByKey,
+  versioned,
 }: {
   nodes: Node[];
-  parentUid: string;
-  previous: Map<string, Owned>;
-  linePrevious: Map<string, Owned>;
+  legacyByKey?: Map<string, Owned>;
+  versioned: Map<string, Owned>;
 }): Map<Node, Owned> => {
+  const matches = new Map<Node, Owned>();
+  if (!legacyByKey) return matches;
   const groups = new Map<string, Node[]>();
   for (const node of nodes) {
-    if (!node.legacyLineKey) continue;
-    const key = node.legacyLineKey.key;
+    if (!node.legacyKey) continue;
+    const key = node.legacyKey.key;
     const group = groups.get(key);
     if (group) group.push(node);
     else groups.set(key, [node]);
   }
-  const matches = new Map<Node, Owned>();
   for (const [key, group] of groups) {
-    const old = previous.get(key);
-    if (!old || old.parentUid !== parentUid) continue;
+    const old = legacyByKey.get(key);
+    if (!old) continue;
     // The old key could represent several rows. Use the stored text to preserve the right UID.
     const exact = group.find(
-      (node) => !linePrevious.has(node.key) && node.text === old.text,
+      (node) => !versioned.has(node.key) && node.text === old.text,
     );
     const only = group[0];
     const match =
       exact ||
       (group.length === 1 &&
-      !only.legacyLineKey?.ambiguous &&
-      !linePrevious.has(only.key)
+      !only.legacyKey?.ambiguous &&
+      !versioned.has(only.key)
         ? only
         : undefined);
     if (match) matches.set(match, old);
@@ -68,12 +67,21 @@ export const applyPlan = async ({
     owned: [],
   };
   const previous = new Map<string, Owned>();
-  const linePrevious = new Map<string, Owned>();
-  for (const owned of meta?.owned || [])
-    (owned.lineKeyVersion === 2 ? linePrevious : previous).set(
-      owned.key,
-      owned,
-    );
+  const legacyByParent = new Map<string, Map<string, Owned>>();
+  const versioned = new Map<string, Owned>();
+  for (const owned of meta?.owned || []) {
+    if (owned.keyVersion === 2 || owned.lineKeyVersion === 2) {
+      versioned.set(owned.key, owned);
+      continue;
+    }
+    previous.set(owned.key, owned);
+    let siblings = legacyByParent.get(owned.parentUid);
+    if (!siblings) {
+      siblings = new Map();
+      legacyByParent.set(owned.parentUid, siblings);
+    }
+    siblings.set(owned.key, owned);
+  }
   const seen = new Set<Owned>();
   const check = (): void => {
     if (signal.aborted)
@@ -91,16 +99,15 @@ export const applyPlan = async ({
       );
     const write = async (nodes: Node[], parentUid: string): Promise<void> => {
       if (!nodes.length) return;
-      const legacyMatches = matchLegacyLines({
+      const legacyMatches = matchLegacyKeys({
         nodes,
-        parentUid,
-        previous,
-        linePrevious,
+        legacyByKey: legacyByParent.get(parentUid),
+        versioned,
       });
       const entries = nodes.map((node) => {
         check();
-        const old = node.legacyLineKey
-          ? linePrevious.get(node.key) || legacyMatches.get(node)
+        const old = node.legacyKey
+          ? versioned.get(node.key) || legacyMatches.get(node)
           : previous.get(node.key);
         const current = old && graph.read(old.uid, { shallow: true });
         return {
@@ -137,9 +144,7 @@ export const applyPlan = async ({
         ) {
           journal.retained.push(old.uid);
           journal.owned.push(
-            node.legacyLineKey
-              ? { ...old, key: node.key, lineKeyVersion: 2 }
-              : old,
+            node.legacyKey ? { ...old, key: node.key, keyVersion: 2 } : old,
           );
           continue;
         }
@@ -171,7 +176,7 @@ export const applyPlan = async ({
           parentUid,
           key: node.key,
           text: node.text,
-          ...(node.legacyLineKey && { lineKeyVersion: 2 }),
+          ...(node.legacyKey && { keyVersion: 2 }),
         });
         onProgress?.(journal.changes.length);
         await write(node.children, uid);

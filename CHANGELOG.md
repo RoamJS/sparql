@@ -34,4 +34,4 @@ All notable changes are documented here, following [Keep a Changelog](https://ke
 - **Recovery concurrency** - Keep recovery and imports serialized, disable overlapping actions and stop between recovery writes.
 
 - **Saved definitions** - Serialize saving and copying with imports and recovery. An interrupted save preserves the previous settings and asks you to reload and repair the definition before refreshing.
-- **Line identities** - Keep distinct rows when a value contains key delimiters and reuse safely matched blocks when refreshing earlier saved imports.
+- **Output identities** - Keep distinct Parent, Line and Table results when a value contains key delimiters and reuse safely matched blocks when refreshing earlier saved imports.

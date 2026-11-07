@@ -3,7 +3,7 @@ import { Cell, Node, OutputFormat, Plan, Result } from "~/types";
 const isImage = (s: string): boolean =>
   /^https?:\/\/[^\s]+\.(?:jpg|jpeg|gif|png|svg)(?:[?#].*)?$/i.test(s);
 const isUrl = (s: string): boolean => /^(?:https?:\/\/|www\.)[^\s]+$/i.test(s);
-const identity = (cell?: Cell): string =>
+const legacyIdentity = (cell?: Cell): string =>
   cell
     ? `${cell.type}:${cell.value}:${cell.datatype || ""}:${cell["xml:lang"] || ""}`
     : "unbound";
@@ -71,65 +71,73 @@ export const planOutput = ({
   result.results.bindings.forEach((row) => {
     const cells = vars.map((variable) => {
       const text = formatCell(row, variable);
+      const cell = row[variable];
+      const key = compatibility
+        ? text
+        : cell
+          ? [
+              variable,
+              cell.type,
+              cell.value,
+              cell.datatype || "",
+              cell["xml:lang"] || "",
+            ]
+          : [variable];
       return {
         text,
-        key: compatibility ? text : `${variable}:${identity(row[variable])}`,
+        key,
+        legacyKey: compatibility ? text : `${variable}:${legacyIdentity(cell)}`,
+        ambiguous:
+          !compatibility &&
+          !!(
+            cell?.datatype ||
+            cell?.["xml:lang"] ||
+            (cell?.type !== "uri" && cell?.value.includes(":"))
+          ),
       };
     });
     if (format === "Line") {
-      const text = cells.map((cell) => cell.text).join(" ");
-      const key = JSON.stringify(
-        compatibility
-          ? cells.map((cell) => cell.text)
-          : vars.map((variable) => {
-              const cell = row[variable];
-              return cell
-                ? [
-                    variable,
-                    cell.type,
-                    cell.value,
-                    cell.datatype || "",
-                    cell["xml:lang"] || "",
-                  ]
-                : [variable];
-            }),
-      );
+      const key = JSON.stringify(cells.map((cell) => cell.key));
       if (!lineKeys.has(key)) {
         lineKeys.add(key);
         roots.push({
           key,
-          text,
+          text: cells.map((cell) => cell.text).join(" "),
           children: [],
-          legacyLineKey: {
-            key: cells.map((cell) => cell.key).join("|"),
-            ambiguous:
-              cells.some((cell) => cell.key.includes("|")) ||
-              (!compatibility &&
-                vars.some(
-                  (variable) =>
-                    row[variable]?.datatype || row[variable]?.["xml:lang"],
-                )),
+          legacyKey: {
+            key: cells.map((cell) => cell.legacyKey).join("|"),
+            ambiguous: cells.some(
+              (cell) => cell.ambiguous || cell.legacyKey.includes("|"),
+            ),
           },
         });
       }
       return;
     }
     let level = roots;
-    let prefix = "";
+    let legacyPrefix = "";
+    const path: (typeof cells)[number]["key"][] = [];
     cells
       .filter((cell) => format === "Table" || cell.text)
       .forEach((cell) => {
-        prefix += `/${cell.key}`;
+        path.push(cell.key);
+        legacyPrefix += `/${cell.legacyKey}`;
+        const key = `path:${JSON.stringify(path)}`;
         let group = grouped.get(level);
         if (!group) {
           group = new Map();
           grouped.set(level, group);
         }
-        let node = group.get(prefix);
+        let node = group.get(key);
         if (!node) {
-          node = { key: prefix, text: cell.text, children: [] };
+          node = {
+            key,
+            text: cell.text,
+            children: [],
+            legacyKey: { key: legacyPrefix, ambiguous: cell.ambiguous },
+          };
           level.push(node);
-          group.set(prefix, node);
+          group.set(key, node);
         }
         level = node.children;
       });

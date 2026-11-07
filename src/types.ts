@@ -22,7 +22,7 @@ export type Node = {
   key: string;
   text: string;
   children: Node[];
-  legacyLineKey?: { key: string; ambiguous: boolean };
+  legacyKey?: { key: string; ambiguous: boolean };
 };
 export type Identity = { title: string; uri: string };
 export type Plan = {
@@ -51,6 +51,7 @@ export type Owned = {
   parentUid: string;
   key: string;
   text: string;
+  keyVersion?: 2;
   lineKeyVersion?: 2;
 };
 export type ImportMeta = {

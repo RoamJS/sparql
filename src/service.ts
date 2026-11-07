@@ -68,7 +68,7 @@ export const adoptLegacy = ({
         parentUid,
         key: node.key,
         text: node.text,
-        ...(node.legacyLineKey && { lineKeyVersion: 2 }),
+        ...(node.legacyKey && { keyVersion: 2 }),
       });
       return true;
     });

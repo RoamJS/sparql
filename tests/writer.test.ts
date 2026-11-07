@@ -74,7 +74,7 @@ test("a colliding legacy Line row keeps its referenced UID through migration and
   assert.deepEqual(first.retained, ["old-line"]);
   assert.equal(first.changes.length, 1);
   assert.equal(first.changes[0].after, "x y::|b:literal:z");
-  assert.ok(first.owned.every((owned) => owned.lineKeyVersion === 2));
+  assert.ok(first.owned.every((owned) => owned.keyVersion === 2));
   assert.equal(new Set(first.owned.map((owned) => owned.uid)).size, 2);
   result.results.bindings.reverse();
   const again = await run({ ...meta, owned: first.owned });
@@ -82,6 +82,79 @@ test("a colliding legacy Line row keeps its referenced UID through migration and
   assert.deepEqual(again.owned, first.owned);
   assert.equal(graph.read("old-line")?.text, "User edit");
   assert.equal(graph.read("root")?.children.length, 2);
+});
+
+test("nested ownership migration matches a legacy key within its saved parent", async () => {
+  const graph = setup();
+  graph.put("one", "one", "root");
+  graph.put("two", "one/two", "root");
+  graph.put("item-a", "two/three", "one");
+  graph.put("item-b", "three", "two");
+  graph.refs.add("item-a");
+  graph.refs.add("item-b");
+  const result: Result = {
+    head: { vars: ["group", "item"] },
+    results: {
+      bindings: [
+        {
+          group: { type: "literal", value: "one" },
+          item: { type: "literal", value: "two/three" },
+        },
+        {
+          group: { type: "literal", value: "one/two" },
+          item: { type: "literal", value: "three" },
+        },
+      ],
+    },
+  };
+  const meta: ImportMeta = {
+    version: 1,
+    rootUid: "root",
+    name: "Test",
+    endpointMode: "prefix",
+    compatibility: true,
+    label: "Import",
+    ownershipVerified: true,
+    owned: [
+      { uid: "one", parentUid: "root", key: "/one", text: "one" },
+      { uid: "two", parentUid: "root", key: "/one/two", text: "one/two" },
+      {
+        uid: "item-a",
+        parentUid: "one",
+        key: "/one/two/three",
+        text: "two/three",
+      },
+      { uid: "item-b", parentUid: "two", key: "/one/two/three", text: "three" },
+    ],
+  };
+  const run = (previous: ImportMeta): ReturnType<typeof applyPlan> =>
+    applyPlan({
+      graph,
+      rootUid: "root",
+      plan: planOutput({
+        result,
+        format: "Parent",
+        compatibility: true,
+        dateTitle: () => "",
+      }),
+      meta: previous,
+      signal: new AbortController().signal,
+      expectedRevision: revision(graph, "root"),
+    });
+  const first = await run(meta);
+  assert.equal(first.status, "complete");
+  assert.equal(first.changes.length, 0);
+  assert.deepEqual(first.owned.map((owned) => owned.uid).sort(), [
+    "item-a",
+    "item-b",
+    "one",
+    "two",
+  ]);
+  assert.ok(first.owned.every((owned) => owned.keyVersion === 2));
+  result.results.bindings.reverse();
+  const again = await run({ ...meta, owned: first.owned });
+  assert.deepEqual(again.owned, first.owned);
+  assert.equal(again.changes.length, 0);
 });
 
 test("an unambiguous legacy Line refresh can update a paired label in place", async () => {

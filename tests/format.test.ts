@@ -22,6 +22,75 @@ const result: Result = {
   },
 };
 const dateTitle = (): string => "December 10th, 1815";
+test("Line keeps delimiter collisions distinct and deduplicates exact rows", () => {
+  const literal = (
+    value: string,
+    datatype?: string,
+  ): Result["results"]["bindings"][number][string] => ({
+    type: "literal",
+    value,
+    datatype,
+  });
+  const cases = [
+    {
+      compatibility: false,
+      rows: [
+        { a: literal("x::|b:literal:y"), b: literal("z") },
+        { a: literal("x"), b: literal("y::|b:literal:z") },
+      ],
+    },
+    {
+      compatibility: true,
+      rows: [
+        { a: literal("x|y"), b: literal("z") },
+        { a: literal("x"), b: literal("y|z") },
+      ],
+    },
+    {
+      compatibility: false,
+      rows: [
+        {
+          a: literal("x", "https://example.test/type:urn:other"),
+          b: literal(""),
+        },
+        {
+          a: literal("x:https://example.test/type", "urn:other"),
+          b: literal(""),
+        },
+      ],
+    },
+  ];
+  for (const { compatibility, rows } of cases) {
+    const output = planOutput({
+      result: {
+        head: { vars: ["a", "b"] },
+        results: { bindings: [...rows, rows[0]] },
+      },
+      format: "Line",
+      compatibility,
+      dateTitle,
+    });
+    assert.equal(output.nodes.length, 2);
+    assert.equal(
+      output.nodes[0].legacyLineKey?.key,
+      output.nodes[1].legacyLineKey?.key,
+    );
+    assert.notEqual(output.nodes[0].key, output.nodes[1].key);
+  }
+});
+
+test("typed Line distinguishes an unbound cell from an empty literal", () => {
+  const output = planOutput({
+    result: {
+      head: { vars: ["x"] },
+      results: { bindings: [{}, { x: { type: "literal", value: "" } }] },
+    },
+    format: "Line",
+    dateTitle,
+  });
+  assert.equal(output.nodes.length, 2);
+  assert.ok(output.nodes.every((node) => node.text === ""));
+});
 test("Parent golden tree preserves variable order, property attributes and grouped values", () => {
   const plan = planOutput({
     result,

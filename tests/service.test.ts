@@ -1,7 +1,7 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
 import { adoptLegacy, QueryService } from "../src/service";
-import { readSaved, saveRecord } from "../src/storage";
+import { definitionRevision, readSaved, saveRecord } from "../src/storage";
 import { Query } from "../src/types";
 import { MemoryGraph } from "./helpers";
 const query: Query = {
@@ -19,6 +19,54 @@ const setup = (): { graph: MemoryGraph; service: QueryService } => {
   graph.put("page", "Destination");
   return { graph, service: new QueryService(graph, () => "Date") };
 };
+test("a definition snapshots the draft and acknowledges an in-flight final commit", async () => {
+  const { graph, service } = setup();
+  graph.put("root", "Output", "page");
+  await saveRecord({ graph, rootUid: "root", query });
+  const saved = readSaved(graph)[0];
+  const draft: Query = {
+    ...query,
+    source: "https://snapshot.test/?query=",
+    outputFormat: "Line",
+  };
+  const update = graph.update;
+  let started = (): void => {};
+  let release = (): void => {};
+  const finalWriteStarted = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  const hold = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  graph.update = async (args) => {
+    if (
+      args.text.startsWith("root {") &&
+      !args.text.includes('"pendingDefinition"')
+    ) {
+      started();
+      await hold;
+    }
+    await update(args);
+  };
+  const pending = service.saveDefinition({
+    saved,
+    expectedRevision: definitionRevision(graph, saved),
+    query: draft,
+    name: "Snapshot",
+    label: "Output",
+  });
+  draft.source = "https://later.test/?query=";
+  draft.outputFormat = "Table";
+  await finalWriteStarted;
+  assert.equal(service.busy(), true);
+  service.cancel();
+  release();
+  const committed = await pending;
+  assert.equal(committed.source, "https://snapshot.test/?query=");
+  assert.equal(committed.outputFormat, "Line");
+  assert.equal(committed.error, undefined);
+  assert.equal(service.busy(), false);
+});
 test("adopts legacy outputs only when the whole validated tree matches, preserving UIDs", () => {
   const { graph } = setup();
   graph.put("old", "Import", "page");

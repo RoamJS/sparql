@@ -69,18 +69,48 @@ export const planOutput = ({
   const grouped = new WeakMap<Node[], Map<string, Node>>();
   const lineKeys = new Set<string>();
   result.results.bindings.forEach((row) => {
-    const cells = vars.map((variable) => ({
-      text: formatCell(row, variable),
-      key: compatibility
-        ? formatCell(row, variable)
-        : `${variable}:${identity(row[variable])}`,
-    }));
+    const cells = vars.map((variable) => {
+      const text = formatCell(row, variable);
+      return {
+        text,
+        key: compatibility ? text : `${variable}:${identity(row[variable])}`,
+      };
+    });
     if (format === "Line") {
       const text = cells.map((cell) => cell.text).join(" ");
-      const key = cells.map((cell) => cell.key).join("|");
+      const key = JSON.stringify(
+        compatibility
+          ? cells.map((cell) => cell.text)
+          : vars.map((variable) => {
+              const cell = row[variable];
+              return cell
+                ? [
+                    variable,
+                    cell.type,
+                    cell.value,
+                    cell.datatype || "",
+                    cell["xml:lang"] || "",
+                  ]
+                : [variable];
+            }),
+      );
       if (!lineKeys.has(key)) {
         lineKeys.add(key);
-        roots.push({ key, text, children: [] });
+        roots.push({
+          key,
+          text,
+          children: [],
+          legacyLineKey: {
+            key: cells.map((cell) => cell.key).join("|"),
+            ambiguous:
+              cells.some((cell) => cell.key.includes("|")) ||
+              (!compatibility &&
+                vars.some(
+                  (variable) =>
+                    row[variable]?.datatype || row[variable]?.["xml:lang"],
+                )),
+          },
+        });
       }
       return;
     }

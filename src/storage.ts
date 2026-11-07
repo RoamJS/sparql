@@ -52,7 +52,9 @@ export const readSaved = (graph: Graph): Saved[] =>
   (child(graph.page(CONFIG), "queries")?.children || []).map((record) => {
     const [query, source, format] = record.children;
     const meta = readMeta(graph, record.text);
-    const outputFormat = format?.text as OutputFormat;
+    const previous = meta?.pendingDefinition;
+    const outputFormat =
+      previous?.outputFormat ?? (format?.text as OutputFormat);
     return {
       recordUid: record.uid,
       rootUid: record.text,
@@ -60,22 +62,38 @@ export const readSaved = (graph: Graph): Saved[] =>
         meta?.name ||
         graph.read(record.text)?.text ||
         `Missing output (${record.text})`,
-      query: query?.text || "",
-      source: source?.text || "",
+      query: previous?.query ?? (query?.text || ""),
+      source: previous?.source ?? (source?.text || ""),
       outputFormat,
       endpointMode: meta?.endpointMode || "prefix",
       sourceUid: meta?.sourceUid,
       compatibility: meta?.compatibility ?? true,
-      error:
-        !query?.text ||
-        !source?.text ||
-        !["Parent", "Line", "Table"].includes(outputFormat)
+      error: previous
+        ? "Definition save was interrupted. The previous settings are loaded. Review them and use Save definition to repair the record before refreshing."
+        : !query?.text ||
+            !source?.text ||
+            !["Parent", "Line", "Table"].includes(outputFormat)
           ? "Malformed legacy saved record; edit its first three children (query, endpoint, format)."
           : !graph.read(record.text)
             ? "Saved import destination was deleted."
             : undefined,
     };
   });
+
+export const definitionRevision = (
+  graph: Graph,
+  record: Pick<Saved, "rootUid" | "recordUid">,
+): string => {
+  const meta = readMeta(graph, record.rootUid);
+  return JSON.stringify([
+    graph.read(record.recordUid),
+    meta?.name,
+    meta?.label,
+    meta?.endpointMode,
+    meta?.sourceUid,
+    meta?.pendingDefinition,
+  ]);
+};
 
 const checkCancelled = (signal?: AbortSignal): void => {
   if (signal?.aborted)
@@ -120,19 +138,25 @@ export const copyQuerySource = async ({
   graph,
   query,
   name,
+  signal,
 }: {
   graph: Graph;
   query: Query;
   name: string;
+  signal?: AbortSignal;
 }): Promise<string> => {
+  checkCancelled(signal);
   const configUid = await graph.ensurePage(CONFIG);
   const sourcesUid = await ensureChild({
     graph,
     parentUid: configUid,
     text: "standalone/sources",
+    signal,
   });
+  checkCancelled(signal);
   const parentUid = graph.uid();
   await graph.create({ uid: parentUid, parentUid: sourcesUid, text: name });
+  checkCancelled(signal);
   const uid = graph.uid();
   await graph.create({
     uid,
@@ -143,8 +167,10 @@ export const copyQuerySource = async ({
     `sparql endpoint:: ${query.source}`,
     `sparql endpoint mode:: ${query.endpointMode}`,
     `sparql format:: ${query.outputFormat}`,
-  ])
+  ]) {
+    checkCancelled(signal);
     await graph.create({ uid: graph.uid(), parentUid: uid, text });
+  }
   return uid;
 };
 export const saveMeta = async ({
@@ -172,16 +198,17 @@ export const saveMeta = async ({
   const text = `${meta.rootUid} ${JSON.stringify(meta)}`;
   if (existing) await graph.update({ uid: existing.uid, text });
   else await graph.create({ uid: graph.uid(), parentUid, text });
-  checkCancelled(signal);
 };
 export const saveRecord = async ({
   graph,
   rootUid,
+  recordUid,
   query,
   signal,
 }: {
   graph: Graph;
   rootUid: string;
+  recordUid?: string;
   query: Query;
   signal?: AbortSignal;
 }): Promise<void> => {
@@ -197,10 +224,14 @@ export const saveRecord = async ({
   checkCancelled(signal);
   const existing = graph
     .read(parentUid)
-    ?.children.find((record) => record.text === rootUid);
-  const recordUid = existing?.uid || graph.uid();
+    ?.children.find(
+      (record) =>
+        record.text === rootUid && (!recordUid || record.uid === recordUid),
+    );
+  if (!existing && recordUid) throw new Error("Saved query was deleted.");
+  const targetUid = existing?.uid || graph.uid();
   if (!existing)
-    await graph.create({ uid: recordUid, parentUid, text: rootUid });
+    await graph.create({ uid: targetUid, parentUid, text: rootUid });
   checkCancelled(signal);
   const values = [query.query, query.source, query.outputFormat];
   for (let index = 0; index < values.length; index++) {
@@ -210,7 +241,7 @@ export const saveRecord = async ({
     else
       await graph.create({
         uid: graph.uid(),
-        parentUid: recordUid,
+        parentUid: targetUid,
         text: values[index],
       });
     checkCancelled(signal);

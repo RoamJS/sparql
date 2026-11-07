@@ -823,3 +823,141 @@ test("recovery disables overlapping UI actions until its graph write finishes", 
     localStorage.clear();
   }
 });
+
+test("Stop preserves the previous definition and reload lets the user repair it", async () => {
+  const graph = await seed();
+  const service = new QueryService(graph, () => "");
+  const saved = readSaved(graph)[0];
+  const record = graph.read(saved.recordUid)!;
+  const update = graph.update;
+  const changedEndpoint = "https://snapshot.test/?query=";
+  let release = (): void => {};
+  let started = (): void => {};
+  const hold = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const entered = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  graph.update = async (args) => {
+    if (args.uid === record.children[1].uid && args.text === changedEndpoint) {
+      started();
+      await hold;
+    }
+    await update(args);
+  };
+  const ui = mount(graph, launch, service);
+  const button = (name: string): HTMLElement =>
+    ui.getByRole("button", { name, exact: true });
+  try {
+    fireEvent.click(button("Query settings"));
+    const endpoint = ui.getByLabelText("SPARQL endpoint", { exact: true });
+    const format = ui.getByLabelText("Output format", { exact: true });
+    fireEvent.change(endpoint, { target: { value: changedEndpoint } });
+    fireEvent.change(format, { target: { value: "Line" } });
+    await act(async () => fireEvent.click(button("Save definition")));
+    await entered;
+    assert.ok(button("Save definition").matches(":disabled"));
+    assert.ok(button("Save a copy").matches(":disabled"));
+    assert.ok(format.matches(":disabled"));
+    await assert.rejects(
+      service.copyDefinition({ query, name: "Conflicting" }),
+      /already running/,
+    );
+    fireEvent.click(button("Stop"));
+    assert.equal(service.busy(), true);
+    await act(async () => release());
+    await waitFor(() =>
+      assert.match(
+        ui.getByRole("status").textContent,
+        /Definition save did not finish/,
+      ),
+    );
+    assert.equal(
+      graph.read(saved.recordUid)!.children[1].text,
+      changedEndpoint,
+    );
+    assert.equal(graph.read(saved.recordUid)!.children[2].text, "Parent");
+    assert.equal(readSaved(graph)[0].source, query.source);
+    assert.match(readSaved(graph)[0].error!, /interrupted/);
+    fireEvent.click(button("Reload saved definition"));
+    assert.equal(endpoint.value, query.source);
+    await act(async () => fireEvent.click(button("Refresh saved import")));
+    assert.match(
+      ui.getByRole("status").textContent,
+      /repair the record before refreshing/,
+    );
+    fireEvent.change(endpoint, { target: { value: changedEndpoint } });
+    fireEvent.change(format, { target: { value: "Line" } });
+    await act(async () => fireEvent.click(button("Save definition")));
+    await waitFor(() =>
+      assert.match(ui.getByRole("status").textContent, /Definition saved/),
+    );
+    assert.equal(readSaved(graph)[0].error, undefined);
+    assert.equal(readSaved(graph)[0].source, changedEndpoint);
+    assert.equal(readSaved(graph)[0].outputFormat, "Line");
+    assert.deepEqual(
+      graph.read(saved.recordUid)!.children.map((field) => field.uid),
+      record.children.map((field) => field.uid),
+    );
+  } finally {
+    release();
+    cleanup();
+    localStorage.clear();
+  }
+});
+
+test("closing an awaited Save a copy stops later writes and leaves the original definition", async () => {
+  const graph = await seed();
+  const service = new QueryService(graph, () => "");
+  const saved = readSaved(graph)[0];
+  const create = graph.create;
+  let release = (): void => {};
+  let started = (): void => {};
+  const hold = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const entered = new Promise<void>((resolve) => {
+    started = resolve;
+  });
+  graph.create = async (args) => {
+    if (args.text.startsWith("sparql endpoint::")) {
+      started();
+      await hold;
+    }
+    await create(args);
+  };
+  const ui = mount(graph, launch, service);
+  try {
+    fireEvent.click(
+      ui.getByRole("button", { name: "Query settings", exact: true }),
+    );
+    await act(async () =>
+      fireEvent.click(
+        ui.getByRole("button", { name: "Save a copy", exact: true }),
+      ),
+    );
+    await entered;
+    const writes = graph.writes;
+    ui.unmount();
+    assert.equal(service.busy(), true);
+    await act(async () => release());
+    await waitFor(() => assert.equal(service.busy(), false));
+    assert.equal(graph.writes, writes + 1);
+    assert.deepEqual(readSaved(graph), [saved]);
+    assert.ok(
+      [...graph.nodes.values()].some((node) =>
+        node.text.startsWith("sparql endpoint::"),
+      ),
+    );
+    assert.ok(
+      ![...graph.nodes.values()].some((node) =>
+        node.text.startsWith("sparql endpoint mode::"),
+      ),
+    );
+  } finally {
+    release();
+    cleanup();
+    localStorage.clear();
+  }
+});

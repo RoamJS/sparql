@@ -24,12 +24,10 @@ import { host } from "~/roam";
 import { Preview, QueryService } from "~/service";
 import {
   ensureCustom,
-  copyQuerySource,
+  definitionRevision,
   readDefaults,
   readMeta,
   readSaved,
-  saveMeta,
-  saveRecord,
   sourceQuery,
 } from "~/storage";
 import { Graph, Journal, Node, OutputFormat, Query, Saved } from "~/types";
@@ -306,7 +304,7 @@ export const Workbench = ({
     setSourceUid(record.sourceUid || "");
     setPreview(undefined);
     setSave(true);
-    savedRevision.current = JSON.stringify(graph.read(record.recordUid));
+    savedRevision.current = definitionRevision(graph, record);
     setError(!!record.error);
     setStatus(
       record.error ||
@@ -514,7 +512,7 @@ export const Workbench = ({
           (record) => record.rootUid === outcome.rootUid,
         );
         if (updated) {
-          savedRevision.current = JSON.stringify(graph.read(updated.recordUid));
+          savedRevision.current = definitionRevision(graph, updated);
           setSaved(updated);
           setDestination(updated.rootUid);
         }
@@ -532,66 +530,47 @@ export const Workbench = ({
   };
   const saveDefinition = async (copy: boolean): Promise<void> => {
     if (!saved || busy || blocked) return;
-    if (
-      !copy &&
-      savedRevision.current !== JSON.stringify(graph.read(saved.recordUid))
-    ) {
-      fail(
-        new Error(
-          "Saved definition changed outside this surface. Reload library or save a copy.",
-        ),
-      );
-      return;
-    }
+    setBusy(true);
+    setError(false);
+    setPreview(undefined);
+    setStatus(copy ? "Copying query source…" : "Saving definition…");
     try {
       const query = querySpec();
       if (copy) {
         const copyName = `${name || saved.name} (copy)`;
-        const copiedSourceUid = await copyQuerySource({
-          graph,
+        const copiedSourceUid = await service.copyDefinition({
           query,
           name: copyName,
         });
+        if (!mounted.current) return;
         setSourceUid(copiedSourceUid);
         setSaved(undefined);
         setDestination(launch.destination);
         setSave(true);
-        setPreview(undefined);
         setName(copyName);
         setStatus(
           "Copy draft ready. Import to create a separate saved output and definition.",
         );
         return;
       }
-      await saveRecord({ graph, rootUid: saved.rootUid, query });
-      const meta = readMeta(graph, saved.rootUid);
-      await saveMeta({
-        graph,
-        meta: {
-          ...(meta || {
-            version: 1,
-            rootUid: saved.rootUid,
-            owned: [],
-            compatibility: true,
-          }),
-          name: name || saved.name,
-          label,
-          endpointMode,
-          sourceUid: sourceUid || undefined,
-        },
+      const updated = await service.saveDefinition({
+        saved,
+        expectedRevision: savedRevision.current,
+        query,
+        name: name || saved.name,
+        label,
       });
-      savedRevision.current = JSON.stringify(graph.read(saved.recordUid));
-      const updated = readSaved(graph).find(
-        (record) => record.recordUid === saved.recordUid,
-      );
-      if (updated) setSaved(updated);
+      if (!mounted.current) return;
+      savedRevision.current = definitionRevision(graph, updated);
+      setSaved(updated);
       refreshLibrary();
-      setPreview(undefined);
       setStatus(
         "Definition saved. Preview or refresh reads the updated record.",
       );
     } catch (caught) {
-      fail(caught);
+      if (mounted.current) fail(caught);
+    } finally {
+      if (mounted.current) setBusy(false);
     }
   };
   const searchNow = async (): Promise<void> => {

@@ -1,6 +1,13 @@
 import { labelText, planOutput } from "~/format";
 import { fetchResult } from "~/query";
-import { readMeta, readSaved, saveMeta, saveRecord } from "~/storage";
+import {
+  copyQuerySource,
+  definitionRevision,
+  readMeta,
+  readSaved,
+  saveMeta,
+  saveRecord,
+} from "~/storage";
 import {
   Graph,
   ImportMeta,
@@ -61,6 +68,7 @@ export const adoptLegacy = ({
         parentUid,
         key: node.key,
         text: node.text,
+        ...(node.legacyLineKey && { lineKeyVersion: 2 }),
       });
       return true;
     });
@@ -87,9 +95,9 @@ export class QueryService {
   ) {}
   cancel = (): void => this.active?.abort();
   busy = (): boolean => !!this.active;
-  recover = async (
-    journal: Journal,
-  ): Promise<{ recovered: string[]; retained: string[] }> => {
+  private runExclusive = async <T>(
+    run: (signal: AbortSignal) => Promise<T>,
+  ): Promise<T> => {
     if (this.active)
       throw new Error(
         "An operation is already running. Wait or stop it first.",
@@ -97,15 +105,129 @@ export class QueryService {
     const controller = new AbortController();
     this.active = controller;
     try {
-      return await recover({
-        graph: this.graph,
-        journal,
-        signal: controller.signal,
-      });
+      return await run(controller.signal);
     } finally {
       if (this.active === controller) this.active = undefined;
     }
   };
+  recover = (
+    journal: Journal,
+  ): Promise<{ recovered: string[]; retained: string[] }> =>
+    this.runExclusive((signal) =>
+      recover({ graph: this.graph, journal, signal }),
+    );
+
+  copyDefinition = ({
+    query,
+    name,
+  }: {
+    query: Query;
+    name: string;
+  }): Promise<string> =>
+    this.runExclusive(async (signal) => {
+      const snapshot = { ...query };
+      try {
+        return await copyQuerySource({
+          graph: this.graph,
+          query: snapshot,
+          name,
+          signal,
+        });
+      } catch (error) {
+        throw new Error(
+          `Copy did not finish. Any source blocks already written remain in standalone/sources. ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    });
+
+  saveDefinition = ({
+    saved,
+    expectedRevision,
+    query: draft,
+    name,
+    label,
+  }: {
+    saved: Saved;
+    expectedRevision: string;
+    query: Query;
+    name: string;
+    label: string;
+  }): Promise<Saved> =>
+    this.runExclusive(async (signal) => {
+      const graph = this.graph;
+      const query = { ...draft };
+      if (!query.query || !query.source)
+        throw new Error(
+          "Enter a query and endpoint before saving the definition.",
+        );
+      const current = readSaved(graph).find(
+        (record) =>
+          record.recordUid === saved.recordUid &&
+          record.rootUid === saved.rootUid,
+      );
+      if (!current || definitionRevision(graph, current) !== expectedRevision)
+        throw new Error(
+          "Saved definition changed outside this surface. Reload saved definition or save a copy.",
+        );
+      const root = graph.read(saved.rootUid);
+      if (!root) throw new Error("Saved import destination was deleted.");
+      const meta = readMeta(graph, saved.rootUid) || {
+        version: 1 as const,
+        rootUid: saved.rootUid,
+        owned: [],
+        compatibility: current.compatibility ?? true,
+        name: current.name,
+        label:
+          root.text.replace(/\s*\{\{\[\[table\]\]\}\}/, "") || current.name,
+        endpointMode: current.endpointMode,
+        sourceUid: current.sourceUid,
+      };
+      try {
+        // Keep a readable baseline across Stop, reload, or a failed ordered-field write.
+        await saveMeta({
+          graph,
+          signal,
+          meta: {
+            ...meta,
+            pendingDefinition: meta.pendingDefinition ?? {
+              query: current.query,
+              source: current.source,
+              outputFormat: current.outputFormat,
+            },
+          },
+        });
+        await saveRecord({
+          graph,
+          rootUid: saved.rootUid,
+          recordUid: saved.recordUid,
+          query,
+          signal,
+        });
+        // Once the final graph write resolves, the definition has committed even if Stop arrived in flight.
+        await saveMeta({
+          graph,
+          signal,
+          meta: {
+            ...meta,
+            name,
+            label,
+            endpointMode: query.endpointMode,
+            sourceUid: query.sourceUid,
+            pendingDefinition: undefined,
+          },
+        });
+      } catch (error) {
+        throw new Error(
+          `Definition save did not finish. Reload saved definition before retrying. ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      const updated = readSaved(graph).find(
+        (record) => record.recordUid === saved.recordUid,
+      );
+      if (!updated || updated.error)
+        throw new Error(updated?.error || "Saved query was deleted.");
+      return updated;
+    });
   preview = async ({
     query,
     destination,
@@ -226,6 +348,13 @@ export class QueryService {
     if (preview.signature !== currentSignature)
       throw new Error(
         "Preview is stale. Preview the current query and destination again.",
+      );
+    if (
+      preview.rootUid &&
+      readMeta(this.graph, preview.rootUid)?.pendingDefinition
+    )
+      throw new Error(
+        "Definition save was interrupted. Reload saved definition and repair it before refreshing.",
       );
     if (
       revision(this.graph, preview.destination) !== preview.destinationRevision

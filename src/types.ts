@@ -18,7 +18,12 @@ export type Tree = {
   order?: number;
   edited?: number;
 };
-export type Node = { key: string; text: string; children: Node[] };
+export type Node = {
+  key: string;
+  text: string;
+  children: Node[];
+  legacyLineKey?: { key: string; ambiguous: boolean };
+};
 export type Identity = { title: string; uri: string };
 export type Plan = {
   nodes: Node[];
@@ -46,6 +51,7 @@ export type Owned = {
   parentUid: string;
   key: string;
   text: string;
+  lineKeyVersion?: 2;
 };
 export type ImportMeta = {
   version: 1;
@@ -59,6 +65,7 @@ export type ImportMeta = {
   label: string;
   renderedLabel?: string;
   lastRun?: string;
+  pendingDefinition?: Pick<Query, "query" | "source" | "outputFormat">;
 };
 export type Change = {
   kind: "create" | "update";

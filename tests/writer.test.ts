@@ -1,7 +1,8 @@
 import { strict as assert } from "node:assert";
 import { test } from "node:test";
+import { planOutput } from "../src/format";
 import { applyPlan, recover, revision } from "../src/writer";
-import { ImportMeta, Plan } from "../src/types";
+import { ImportMeta, Plan, Result } from "../src/types";
 import { MemoryGraph } from "./helpers";
 const plan: Plan = {
   nodes: [
@@ -21,6 +22,117 @@ const setup = (): MemoryGraph => {
   graph.put("root", "Import");
   return graph;
 };
+test("a colliding legacy Line row keeps its referenced UID through migration and refresh", async () => {
+  const graph = setup();
+  graph.put("old-line", "User edit", "root");
+  graph.refs.add("old-line");
+  const result: Result = {
+    head: { vars: ["a", "b"] },
+    results: {
+      bindings: [
+        {
+          a: { type: "literal", value: "x::|b:literal:y" },
+          b: { type: "literal", value: "z" },
+        },
+        {
+          a: { type: "literal", value: "x" },
+          b: { type: "literal", value: "y::|b:literal:z" },
+        },
+      ],
+    },
+  };
+  const meta: ImportMeta = {
+    version: 1,
+    rootUid: "root",
+    name: "Test",
+    endpointMode: "prefix",
+    compatibility: false,
+    label: "Import",
+    ownershipVerified: true,
+    owned: [
+      {
+        uid: "old-line",
+        parentUid: "root",
+        text: "x::|b:literal:y z",
+        key: "a:literal:x::|b:literal:y::|b:literal:z::",
+      },
+    ],
+  };
+  const run = (
+    previous: ImportMeta,
+  ): Promise<Awaited<ReturnType<typeof applyPlan>>> =>
+    applyPlan({
+      graph,
+      rootUid: "root",
+      plan: planOutput({ result, format: "Line", dateTitle: () => "" }),
+      meta: previous,
+      signal: new AbortController().signal,
+      expectedRevision: revision(graph, "root"),
+    });
+  const first = await run(meta);
+  assert.equal(first.status, "complete");
+  assert.deepEqual(first.retained, ["old-line"]);
+  assert.equal(first.changes.length, 1);
+  assert.equal(first.changes[0].after, "x y::|b:literal:z");
+  assert.ok(first.owned.every((owned) => owned.lineKeyVersion === 2));
+  assert.equal(new Set(first.owned.map((owned) => owned.uid)).size, 2);
+  result.results.bindings.reverse();
+  const again = await run({ ...meta, owned: first.owned });
+  assert.equal(again.changes.length, 0);
+  assert.deepEqual(again.owned, first.owned);
+  assert.equal(graph.read("old-line")?.text, "User edit");
+  assert.equal(graph.read("root")?.children.length, 2);
+});
+
+test("an unambiguous legacy Line refresh can update a paired label in place", async () => {
+  const graph = setup();
+  graph.put("old-line", "[[Old label]]", "root");
+  const output = planOutput({
+    result: {
+      head: { vars: ["x", "xLabel"] },
+      results: {
+        bindings: [
+          {
+            x: { type: "uri", value: "https://example.test/entity" },
+            xLabel: { type: "literal", value: "New label" },
+          },
+        ],
+      },
+    },
+    format: "Line",
+    dateTitle: () => "",
+  });
+  const applied = await applyPlan({
+    graph,
+    rootUid: "root",
+    plan: output,
+    meta: {
+      version: 1,
+      rootUid: "root",
+      name: "Test",
+      endpointMode: "prefix",
+      compatibility: false,
+      label: "Import",
+      ownershipVerified: true,
+      owned: [
+        {
+          uid: "old-line",
+          parentUid: "root",
+          text: "[[Old label]]",
+          key: "x:uri:https://example.test/entity::",
+        },
+      ],
+    },
+    signal: new AbortController().signal,
+    expectedRevision: revision(graph, "root"),
+  });
+  assert.equal(applied.status, "complete");
+  assert.deepEqual(
+    applied.changes.map(({ kind, uid }) => [kind, uid]),
+    [["update", "old-line"]],
+  );
+  assert.equal(graph.read("old-line")?.text, "[[New label]]");
+});
 test("awaits all writes and updates matching owned UIDs in place", async () => {
   const graph = setup();
   const first = await applyPlan({

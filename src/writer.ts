@@ -1,8 +1,48 @@
 import { insertionOrders } from "~/siblingOrder";
-import { Graph, ImportMeta, Journal, Node, Plan } from "~/types";
+import { Graph, ImportMeta, Journal, Node, Owned, Plan } from "~/types";
 
 export const revision = (graph: Graph, uid: string): string =>
   JSON.stringify(graph.read(uid));
+
+const matchLegacyLines = ({
+  nodes,
+  parentUid,
+  previous,
+  linePrevious,
+}: {
+  nodes: Node[];
+  parentUid: string;
+  previous: Map<string, Owned>;
+  linePrevious: Map<string, Owned>;
+}): Map<Node, Owned> => {
+  const groups = new Map<string, Node[]>();
+  for (const node of nodes) {
+    if (!node.legacyLineKey) continue;
+    const key = node.legacyLineKey.key;
+    const group = groups.get(key);
+    if (group) group.push(node);
+    else groups.set(key, [node]);
+  }
+  const matches = new Map<Node, Owned>();
+  for (const [key, group] of groups) {
+    const old = previous.get(key);
+    if (!old || old.parentUid !== parentUid) continue;
+    // The old key could represent several rows. Use the stored text to preserve the right UID.
+    const exact = group.find(
+      (node) => !linePrevious.has(node.key) && node.text === old.text,
+    );
+    const only = group[0];
+    const match =
+      exact ||
+      (group.length === 1 &&
+      !only.legacyLineKey?.ambiguous &&
+      !linePrevious.has(only.key)
+        ? only
+        : undefined);
+    if (match) matches.set(match, old);
+  }
+  return matches;
+};
 
 export const applyPlan = async ({
   graph,
@@ -27,10 +67,14 @@ export const applyPlan = async ({
     retained: [],
     owned: [],
   };
-  const previous = new Map(
-    (meta?.owned || []).map((owned) => [owned.key, owned]),
-  );
-  const seen = new Set<string>();
+  const previous = new Map<string, Owned>();
+  const linePrevious = new Map<string, Owned>();
+  for (const owned of meta?.owned || [])
+    (owned.lineKeyVersion === 2 ? linePrevious : previous).set(
+      owned.key,
+      owned,
+    );
+  const seen = new Set<Owned>();
   const check = (): void => {
     if (signal.aborted)
       throw new Error(
@@ -47,9 +91,17 @@ export const applyPlan = async ({
       );
     const write = async (nodes: Node[], parentUid: string): Promise<void> => {
       if (!nodes.length) return;
+      const legacyMatches = matchLegacyLines({
+        nodes,
+        parentUid,
+        previous,
+        linePrevious,
+      });
       const entries = nodes.map((node) => {
         check();
-        const old = previous.get(node.key);
+        const old = node.legacyLineKey
+          ? linePrevious.get(node.key) || legacyMatches.get(node)
+          : previous.get(node.key);
         const current = old && graph.read(old.uid, { shallow: true });
         return {
           node,
@@ -74,7 +126,7 @@ export const applyPlan = async ({
       });
       for (const { node, old, uid, retained } of entries) {
         check();
-        seen.add(node.key);
+        if (old) seen.add(old);
         const current = old && graph.read(uid, { shallow: true });
         if (
           old &&
@@ -84,7 +136,11 @@ export const applyPlan = async ({
             graph.parent(uid) !== parentUid)
         ) {
           journal.retained.push(old.uid);
-          journal.owned.push(old);
+          journal.owned.push(
+            node.legacyLineKey
+              ? { ...old, key: node.key, lineKeyVersion: 2 }
+              : old,
+          );
           continue;
         }
         if (current && current.text !== node.text) {
@@ -110,14 +166,20 @@ export const applyPlan = async ({
             after: node.text,
           });
         }
-        journal.owned.push({ uid, parentUid, key: node.key, text: node.text });
+        journal.owned.push({
+          uid,
+          parentUid,
+          key: node.key,
+          text: node.text,
+          ...(node.legacyLineKey && { lineKeyVersion: 2 }),
+        });
         onProgress?.(journal.changes.length);
         await write(node.children, uid);
       }
     };
     await write(plan.nodes, rootUid);
     (meta?.owned || [])
-      .filter((owned) => !seen.has(owned.key))
+      .filter((owned) => !seen.has(owned))
       .forEach((owned) => {
         journal.retained.push(owned.uid);
         journal.owned.push(owned);
